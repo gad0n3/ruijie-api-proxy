@@ -1,0 +1,393 @@
+openapi: 3.0.3
+info:
+  title: ruijie-api-proxy
+  version: 1.0.0
+  description: Express proxy API for Ruijie upstream services.
+servers:
+  - url: http://localhost:3000
+paths:
+  /login:
+    post:
+      tags: [Auth Core]
+      summary: Root login alias (same behavior as /auth/core/login)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /auth/core/login:
+    post:
+      tags: [Auth Core]
+      summary: Login via Ruijie access token endpoint and create app session
+      description: Accepts app credentials, requests upstream access token, stores session in Firebase as start/{appid}, and returns normalized auth payload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /auth/core/projects:
+    get:
+      tags: [Auth Core]
+      summary: Get projects
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of projects
+  /auth/core/tenant:
+    get:
+      tags: [Auth Core]
+      summary: Get tenant details
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tenant details
+  /vouchers:
+    get:
+      tags: [Vouchers]
+      summary: Get vouchers
+      description: Returns simplified vouchers from Ruijie intlSamVoucher list API.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: groupId
+          required: true
+          schema:
+            type: string
+          description: Network group id
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: integer
+            enum: [1, 2, 3]
+            default: 1
+          description: 1 Unused, 2 Inuse, 3 Expire
+        - in: query
+          name: start
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: pageSize
+          required: false
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: lang
+          required: false
+          schema:
+            type: string
+            default: en
+      responses:
+        '200':
+          description: Voucher list
+  /vouchers/generate:
+    post:
+      tags: [Vouchers]
+      summary: Generate vouchers
+      description: Creates vouchers via Ruijie intlSamVoucher/create endpoint using tenantName from session.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [groupId, userGroupId, profile]
+              properties:
+                groupId:
+                  type: integer
+                userGroupId:
+                  type: integer
+                profile:
+                  type: string
+                  description: authProfileId from package list
+                count:
+                  type: integer
+                  description: Alias of quantity
+                quantity:
+                  type: string
+                createCodeType:
+                  type: string
+                  default: '1'
+                codeSize:
+                  type: integer
+                  default: 9
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                phone:
+                  type: string
+                comment:
+                  type: string
+                lang:
+                  type: string
+                  default: en
+      responses:
+        '200':
+          description: Generate vouchers response
+  /vouchers/expired:
+    delete:
+      tags: [Vouchers]
+      summary: Delete expired vouchers in batches
+      description: Accepts list of uuid+voucherCode rows, processes upstream deletion in chunks of 100.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: groupId
+          required: true
+          schema:
+            type: string
+          description: Network group id
+        - in: query
+          name: lang
+          required: false
+          schema:
+            type: string
+            default: en
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [uuid, voucherCode]
+                properties:
+                  uuid:
+                    type: string
+                  voucherCode:
+                    type: string
+      responses:
+        '200':
+          description: Delete vouchers response
+  /packages:
+    get:
+      tags: [Packages]
+      summary: Get packages
+      description: Returns package(usergroup) list from Ruijie intl usergroup list API.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: groupId
+          required: true
+          schema:
+            type: string
+          description: Network group id
+        - in: query
+          name: pageIndex
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: pageSize
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: lang
+          required: false
+          schema:
+            type: string
+            default: en
+      responses:
+        '200':
+          description: Package list
+  /packages/create:
+    post:
+      tags: [Packages]
+      summary: Create package (usergroup)
+      description: Creates auth profile first, then creates usergroup with returned profileId, and returns simplified package payload.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Created package
+  /packages/{groupId}:
+    post:
+      tags: [Packages]
+      summary: Update package (auth profile + usergroup)
+      description: Updates auth profile first, then updates usergroup using the same payload.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Updated package group
+  /packages/{uuid}:
+    delete:
+      tags: [Packages]
+      summary: Delete package (usergroup + auth profile)
+      description: Deletes usergroup first, then deletes auth profile using uuid/authProfileId.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: uuid
+          required: true
+          schema:
+            type: string
+          description: authProfileId/uuid for intlSamProfile delete step
+        - in: query
+          name: groupId
+          required: true
+          schema:
+            type: string
+          description: Network group id
+        - in: query
+          name: packageId
+          required: true
+          schema:
+            type: integer
+          description: Usergroup/package id used in first delete step
+        - in: query
+          name: authProfileId
+          required: false
+          schema:
+            type: string
+          description: Optional override for auth profile id; defaults to path uuid
+        - in: query
+          name: lang
+          required: false
+          schema:
+            type: string
+            default: en
+      responses:
+        '200':
+          description: Package deleted
+  /clients/online:
+    get:
+      tags: [Clients]
+      summary: Get online clients
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Online clients
+  /clients/offline:
+    post:
+      tags: [Clients]
+      summary: Set clients offline
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Offline operation response
+  /clients/current-users:
+    get:
+      tags: [Clients]
+      summary: Get current users
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current users
+  /network_group:
+    get:
+      tags: [Network Group]
+      summary: Get simplified network groups
+      description: Returns leaf network groups only, each item includes name and groupId.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Simplified group list
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - appid
+        - secret
+      properties:
+        appid:
+          type: string
+          description: Ruijie application id
+        secret:
+          type: string
+          description: Ruijie application secret
+        ruijie_id:
+          type: string
+          description: Backward-compatible alias for appid
+        ruijie_secret:
+          type: string
+          description: Backward-compatible alias for secret
+    LoginResponse:
+      type: object
+      required:
+        - appid
+        - secret
+        - authorization
+        - access_code
+      properties:
+        appid:
+          type: string
+        secret:
+          type: string
+        authorization:
+          type: string
+          description: Bearer token used for proxy routes, format Bearer appid::access_token
+        access_code:
+          nullable: true
+          type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: appid::token
