@@ -9,6 +9,8 @@ function createVoucherRoutes({ voucherController }) {
 
   router.get('/', asyncHandler(voucherController.listVouchers));
 
+  router.get('/status', asyncHandler(voucherController.getVoucherStatus));
+
   router.post('/generate', asyncHandler(voucherController.generateVoucher));
 
   router.delete('/expired', asyncHandler(voucherController.deleteExpiredVouchers));

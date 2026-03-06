@@ -251,8 +251,8 @@ function createPackageUseCases({ packageGateway, packageSessionRepository }) {
 
       const upstreamResponse = await packageGateway.listPackages(token, {
         groupId: query.groupId,
-        pageIndex: typeof query.pageIndex === 'undefined' ? 0 : query.pageIndex,
-        pageSize: typeof query.pageSize === 'undefined' ? 20 : query.pageSize,
+        pageIndex: 1,
+        pageSize: 20,
         lang: query.lang || 'en',
         accessToken: composite.accessToken
       });

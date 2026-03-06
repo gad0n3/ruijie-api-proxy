@@ -28,7 +28,7 @@ The project now uses clean architecture across all domains.
   - `useCases/` - business logic
   - `gateways/` - upstream integrations
   - `repositories/` - persistence adapters (when needed)
-- Existing routes/endpoints remain unchanged.
+- Client routes include `auth`, `unauth`, and `suspected` filters.
 - Domain logic is implemented in `modules/`; infrastructure concerns are in `infrastructure/`.
 
 ## Prerequisites
@@ -57,6 +57,7 @@ The project now uses clean architecture across all domains.
 - `bash scripts/dev.sh` - install and run dev server
 - `bash scripts/smoke.sh` - lightweight smoke check
 - `bash scripts/e2e.sh` - login + package CRUD + voucher create/list/delete test flow
+- `bash scripts/e2e-negative.sh` - intentionally wrong/negative test flow for proxy and uplink errors
 
 ### E2E test script
 
@@ -66,12 +67,25 @@ APPID="YOUR_APP_ID" SECRET="YOUR_APP_SECRET" bash scripts/e2e.sh
 
 Optional envs:
 - `BASE_URL` (default `http://localhost:3000`)
-- `GROUP_ID` (auto-picks first from `/network_group` if omitted)
-- `LANG` (default `en`)
+- `GROUP_ID` (if omitted, script auto-picks first synchronized group)
 - `PACKAGE_NAME` (default `2h-e2e`)
 - `PACKAGE_PRICE` (default `1000`)
 - `VOUCHER_COUNT` (default `3`)
 - `VOUCHER_STATUS` (default `3`, expire)
+
+### Negative E2E script
+
+Runs intentionally invalid requests to surface error handling from both proxy and uplink.
+
+```bash
+bash scripts/e2e-negative.sh
+```
+
+With real credentials (recommended for token-related failure checks):
+
+```bash
+APPID="YOUR_APP_ID" SECRET="YOUR_APP_SECRET" bash scripts/e2e-negative.sh
+```
 
 ## API endpoints
 
@@ -83,6 +97,7 @@ Optional envs:
 
 ### Vouchers
 - `GET /vouchers`
+- `GET /vouchers/status`
 - `POST /vouchers/generate`
 
 ### Packages
@@ -92,15 +107,19 @@ Optional envs:
 - `DELETE /packages/:uuid`
 
 ### Clients
-- `GET /clients/online`
-- `POST /clients/offline`
-- `GET /clients/current-users`
+- `GET /clients/auth`
+- `GET /clients/unauth`
+- `GET /clients/suspected`
 
 ## Swagger docs
 
 After starting the server, open:
 
 - `http://localhost:3000/docs`
+
+Additional client integration doc:
+
+- `docs/client-docs.md` (Client API + AI-friendly integration contracts)
 
 ## Example curl commands
 
@@ -113,12 +132,50 @@ curl -X POST http://localhost:3000/login \
 ```
 
 The login response includes:
-- `appid`
-- `secret`
-- `authorization` (format: `Bearer appid::token`)
-- `access_code` (`null`)
+- envelope fields: `success`, `message`, `data`, `meta`
+- login payload in `data`:
+  - `appid`
+  - `secret`
+  - `authorization` (format: `Bearer appid::token`)
+  - `access_code` (`null`)
 
-Use the returned `authorization` value directly for protected routes.
+Use `data.authorization` directly for protected routes.
+
+## Response envelope
+
+All API routes (except `/docs`) return a normalized envelope.
+
+Success:
+
+```json
+{
+  "success": true,
+  "message": "OK",
+  "data": {},
+  "meta": {}
+}
+```
+
+Error:
+
+```json
+{
+  "success": false,
+  "message": "...",
+  "error": {
+    "httpStatus": 401,
+    "details": {}
+  }
+}
+```
+
+Special mapped error:
+
+- If uplink returns `voucherData.code=1014` (`Group has not been synchronized`), proxy maps it to:
+  - HTTP `409`
+  - `error.code = USERGROUP_NOT_SYNCED`
+  - `error.resetRequired = true`
+  - `error.nextAction = refresh_network_group_and_reselect`
 
 ## Detailed login flow
 
@@ -144,10 +201,15 @@ Use the returned `authorization` value directly for protected routes.
 6. Proxy returns to client:
    ```json
    {
-     "appid": "<appid>",
-     "secret": "<secret>",
-     "authorization": "Bearer <appid>::<access_token>",
-     "access_code": null
+     "success": true,
+     "message": "OK",
+     "data": {
+       "appid": "<appid>",
+       "secret": "<secret>",
+       "authorization": "Bearer <appid>::<access_token>",
+       "access_code": null
+     },
+     "meta": {}
    }
    ```
 
@@ -181,10 +243,17 @@ curl -X POST http://localhost:3000/vouchers/generate \
   -d '{"count":10,"type":"daily"}'
 ```
 
+### 5.1) Get voucher status summary
+
+```bash
+curl "http://localhost:3000/vouchers/status?groupId=GROUP_ID" \
+  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
+```
+
 ### 6) Get packages
 
 ```bash
-curl http://localhost:3000/packages \
+curl "http://localhost:3000/packages?groupId=GROUP_ID" \
   -H "Authorization: Bearer APPID::ACCESS_TOKEN"
 ```
 
@@ -213,26 +282,24 @@ curl -X DELETE http://localhost:3000/packages/PACKAGE_UUID \
   -H "Authorization: Bearer APPID::ACCESS_TOKEN"
 ```
 
-### 10) Get online clients
+### 10) Get authenticated clients
 
 ```bash
-curl http://localhost:3000/clients/online \
+curl "http://localhost:3000/clients/auth?group_id=8597722&page_index=1&page_size=100" \
   -H "Authorization: Bearer APPID::ACCESS_TOKEN"
 ```
 
-### 11) Set clients offline
+### 11) Get unauthenticated clients
 
 ```bash
-curl -X POST http://localhost:3000/clients/offline \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"clientIds":["abc123","def456"]}'
+curl "http://localhost:3000/clients/unauth?group_id=8597722&page_index=1&page_size=100" \
+  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
 ```
 
-### 12) Get current users
+### 12) Get suspected clients
 
 ```bash
-curl http://localhost:3000/clients/current-users \
+curl "http://localhost:3000/clients/suspected?group_id=8597722&page_index=1&page_size=100" \
   -H "Authorization: Bearer APPID::ACCESS_TOKEN"
 ```
 

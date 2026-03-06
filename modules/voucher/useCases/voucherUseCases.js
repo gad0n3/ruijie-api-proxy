@@ -37,6 +37,14 @@ function validateVoucherListQuery(query) {
   }
 }
 
+function validateVoucherStatusQuery(query) {
+  if (!query?.groupId) {
+    const error = new Error('groupId is required in query for voucher status.');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 function validateVoucherListSuccess(response) {
   if (Number(response?.code) !== 0) {
     const error = new Error(response?.msg || 'Get voucher list failed.');
@@ -47,6 +55,22 @@ function validateVoucherListSuccess(response) {
 
   if (Number(response?.voucherData?.code) !== 0) {
     const error = new Error(response?.voucherData?.msg || 'Voucher data fetch failed.');
+    error.statusCode = 502;
+    error.details = response;
+    throw error;
+  }
+}
+
+function validateVoucherStatusSuccess(response) {
+  if (Number(response?.code) !== 0) {
+    const error = new Error(response?.msg || 'Get voucher status failed.');
+    error.statusCode = 502;
+    error.details = response;
+    throw error;
+  }
+
+  if (Number(response?.voucherData?.code) !== 0) {
+    const error = new Error(response?.voucherData?.msg || 'Voucher status fetch failed.');
     error.statusCode = 502;
     error.details = response;
     throw error;
@@ -116,6 +140,14 @@ function mapGeneratedVoucher(item) {
     status: String(item?.status || ''),
     profileId: item?.profileId || '',
     expiryTime: item?.expiryTime || ''
+  };
+}
+
+function mapVoucherStatus(voucherData) {
+  return {
+    expired: Number(voucherData?.expired) || 0,
+    total: Number(voucherData?.total) || 0,
+    used: Number(voucherData?.used) || 0
   };
 }
 
@@ -269,6 +301,49 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       return list.map(mapVoucher);
     },
 
+    async getVoucherStatus(token, query) {
+      validateVoucherStatusQuery(query);
+
+      const composite = parseCompositeBearerToken(token);
+
+      if (!composite) {
+        const error = new Error('Composite bearer token is required. Use Bearer appid::token.');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      const session = await voucherSessionRepository.getByAppId(composite.appid);
+
+      if (!session) {
+        const error = new Error('Session not found for provided appid. Please login again.');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      if (session.access_token !== composite.accessToken) {
+        const error = new Error('Bearer token is invalid or expired. Please login again.');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      if (!session.tenantName || !session.tenantId) {
+        const error = new Error('tenantName and tenantId are missing in session. Please login again.');
+        error.statusCode = 401;
+        throw error;
+      }
+
+      const upstreamResponse = await voucherGateway.getVoucherStatus(token, {
+        tenantName: session.tenantName,
+        groupId: query.groupId,
+        tenantId: session.tenantId,
+        accessToken: composite.accessToken
+      });
+
+      validateVoucherStatusSuccess(upstreamResponse);
+
+      return mapVoucherStatus(upstreamResponse?.voucherData);
+    },
+
     async generateVoucher(token, payload) {
       validateGenerateVoucherInput(payload);
 
@@ -342,6 +417,14 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
     async deleteExpiredVouchers(token, query, payload) {
       validateDeleteExpiredInput(query, payload);
 
+      const composite = parseCompositeBearerToken(token);
+
+      if (!composite) {
+        const error = new Error('Composite bearer token is required. Use Bearer appid::token.');
+        error.statusCode = 401;
+        throw error;
+      }
+
       const rows = payload.map(normalizeDeleteRow);
       const batches = chunkArray(rows, 100);
 
@@ -353,6 +436,7 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
           ids,
           groupId: query.groupId,
           lang: query.lang || 'en',
+          accessToken: composite.accessToken,
           list
         });
 

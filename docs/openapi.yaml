@@ -2,9 +2,57 @@ openapi: 3.0.3
 info:
   title: ruijie-api-proxy
   version: 1.0.0
-  description: Express proxy API for Ruijie upstream services.
+  description: |
+    Express proxy API for Ruijie upstream services.
+
+    Client contract guidance:
+    - All API endpoints return a normalized envelope.
+      - success: { success, message, data, meta }
+      - error: { success, message, error: { httpStatus, details } }
+    - `/docs` (Swagger UI assets) is not wrapped.
+    - Endpoint-level payload examples represent the `data` field inside the success envelope.
+    - Client is not required to provide `lang`; server applies default language internally.
+    - If uplink returns `voucherData.code=1014` (Group has not been synchronized), proxy maps it to `409 USERGROUP_NOT_SYNCED`; client should reset selected group/package state and refresh group selection.
 servers:
   - url: http://localhost:3000
+x-uplink:
+  baseUrlEnv:
+    - UPSTREAM_BASE_URL
+    - RUIJIE_UPSTREAM_BASE_URL
+    - UPSTREAM_URL
+  timeoutEnv: UPSTREAM_TIMEOUT_MS
+  auth:
+    loginHeaders:
+      - appid
+      - secret
+    protectedHeader: Authorization: Bearer <access_token>
+    protectedQueryToken: access_token
+    compositeClientToken: Bearer <appid>::<access_token>
+  routes:
+    - proxy: POST /login
+      uplink: POST /oauth20/client/access_token?token=<RUIJIE_LOGIN_TOKEN>
+    - proxy: login tenant sync
+      uplink: GET /org/tenant/info?access_token=
+    - proxy: GET /network_group
+      uplink: GET /group/single/tree?access_token=
+    - proxy: GET /packages
+      uplink: GET /intl/usergroup/list/{groupId}
+    - proxy: POST /packages/create
+      uplink: POST /intlSamProfile/create/{tenant}/{tenant}/{groupId} then POST /intl/usergroup/group/{groupId}
+    - proxy: POST /packages/{groupId}
+      uplink: POST /intlSamProfile/update/{tenant}/{tenant}/{groupId} then PUT /intl/usergroup/group/{groupId}
+    - proxy: DELETE /packages/{uuid}
+      uplink: DELETE /intl/usergroup/group/{groupId} then DELETE /intlSamProfile/delete/{authProfileId}
+    - proxy: GET /vouchers
+      uplink: GET /intlSamVoucher/getList/{tenantName}/{groupId}
+    - proxy: GET /vouchers/status
+      uplink: GET /intlSamVoucher/getStatus/{tenantName}/{groupId}
+    - proxy: POST /vouchers/generate
+      uplink: POST /intlSamVoucher/create/{tenant}/{tenant}/{groupId}
+    - proxy: DELETE /vouchers/expired
+      uplink: DELETE /intlSamVoucher/v2/delete
+    - proxy: GET /clients/auth|unauth|suspected
+      uplink: GET /open/v1/dev/user/current-user
 paths:
   /login:
     post:
@@ -93,15 +141,32 @@ paths:
           schema:
             type: integer
             default: 100
-        - in: query
-          name: lang
-          required: false
-          schema:
-            type: string
-            default: en
       responses:
         '200':
           description: Voucher list
+  /vouchers/status:
+    get:
+      tags: [Vouchers]
+      summary: Get voucher status summary
+      description: Returns expired/total/used summary from Ruijie intlSamVoucher getStatus API. If uplink returns business error `voucherData.code=1014`, proxy responds with `409 USERGROUP_NOT_SYNCED` and clients should reset selected group/package state.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: groupId
+          required: true
+          schema:
+            type: string
+          description: Network group id
+      responses:
+        '200':
+          description: Voucher status summary
+        '409':
+          description: Usergroup is not synchronized yet (mapped from uplink voucherData.code=1014)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientErrorEnvelope'
   /vouchers/generate:
     post:
       tags: [Vouchers]
@@ -145,9 +210,6 @@ paths:
                   type: string
                 comment:
                   type: string
-                lang:
-                  type: string
-                  default: en
       responses:
         '200':
           description: Generate vouchers response
@@ -165,12 +227,6 @@ paths:
           schema:
             type: string
           description: Network group id
-        - in: query
-          name: lang
-          required: false
-          schema:
-            type: string
-            default: en
       requestBody:
         required: true
         content:
@@ -192,7 +248,7 @@ paths:
     get:
       tags: [Packages]
       summary: Get packages
-      description: Returns package(usergroup) list from Ruijie intl usergroup list API.
+      description: Returns package(usergroup) list from Ruijie intl usergroup list API using fixed upstream pagination pageIndex=1 and pageSize=20.
       security:
         - bearerAuth: []
       parameters:
@@ -202,24 +258,6 @@ paths:
           schema:
             type: string
           description: Network group id
-        - in: query
-          name: pageIndex
-          required: false
-          schema:
-            type: integer
-            default: 0
-        - in: query
-          name: pageSize
-          required: false
-          schema:
-            type: integer
-            default: 20
-        - in: query
-          name: lang
-          required: false
-          schema:
-            type: string
-            default: en
       responses:
         '200':
           description: Package list
@@ -295,49 +333,93 @@ paths:
           schema:
             type: string
           description: Optional override for auth profile id; defaults to path uuid
-        - in: query
-          name: lang
-          required: false
-          schema:
-            type: string
-            default: en
       responses:
         '200':
           description: Package deleted
-  /clients/online:
+  /clients/auth:
     get:
       tags: [Clients]
-      summary: Get online clients
+      summary: Get authenticated clients
+      description: Filters current users where authMac is true or account is present.
       security:
         - bearerAuth: []
+      parameters:
+        - in: query
+          name: group_id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: page_index
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: page_size
+          required: false
+          schema:
+            type: integer
+            default: 100
       responses:
         '200':
-          description: Online clients
-  /clients/offline:
-    post:
-      tags: [Clients]
-      summary: Set clients offline
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-      responses:
-        '200':
-          description: Offline operation response
-  /clients/current-users:
+          description: Authenticated clients list
+  /clients/unauth:
     get:
       tags: [Clients]
-      summary: Get current users
+      summary: Get unauthenticated clients
+      description: Filters current users where authMac is false and account is empty.
       security:
         - bearerAuth: []
+      parameters:
+        - in: query
+          name: group_id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: page_index
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: page_size
+          required: false
+          schema:
+            type: integer
+            default: 100
       responses:
         '200':
-          description: Current users
+          description: Unauthenticated clients list
+  /clients/suspected:
+    get:
+      tags: [Clients]
+      summary: Get suspected clients
+      description: Filters current users where authMac and account are missing and flowUpDown exceeds 20MB.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: group_id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: page_index
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: page_size
+          required: false
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Suspected clients list
   /network_group:
     get:
       tags: [Network Group]
@@ -350,6 +432,65 @@ paths:
           description: Simplified group list
 components:
   schemas:
+    ClientSuccessEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+        - meta
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+          description: Always true for successful normalized client responses.
+        message:
+          type: string
+          description: Human readable status message.
+          example: OK
+        data:
+          description: Endpoint payload after client-side normalization.
+          nullable: true
+        meta:
+          type: object
+          description: Optional metadata such as pagination or count.
+          additionalProperties: true
+    ClientErrorEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - error
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+          description: Always false for normalized client errors.
+        message:
+          type: string
+          description: Human readable error message.
+        error:
+          type: object
+          required:
+            - httpStatus
+          properties:
+            httpStatus:
+              type: integer
+              description: HTTP status code from proxy response.
+            details:
+              description: Optional upstream/proxy diagnostic payload.
+              nullable: true
+    ProxyErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Proxy-level error message.
+        details:
+          description: Optional upstream error body.
+          nullable: true
     LoginRequest:
       type: object
       required:
@@ -386,6 +527,13 @@ components:
         access_code:
           nullable: true
           type: string
+  responses:
+    ProxyError:
+      description: Standard proxy error body returned on failures.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProxyErrorResponse'
   securitySchemes:
     bearerAuth:
       type: http

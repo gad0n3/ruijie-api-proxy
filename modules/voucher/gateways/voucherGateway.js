@@ -17,6 +17,19 @@ function createVoucherGateway() {
       });
     },
 
+    getVoucherStatus(token, { tenantName, groupId, tenantId, accessToken }) {
+      return upstreamRequest({
+        method: 'GET',
+        url: `/intlSamVoucher/getStatus/${encodeURIComponent(tenantName)}/${groupId}`,
+        token,
+        params: {
+          tenantId,
+          lang: 'en',
+          access_token: accessToken
+        }
+      });
+    },
+
     generateVoucher(token, { tenantName, groupId, lang, accessToken, payload }) {
       return upstreamRequest({
         method: 'POST',
@@ -31,7 +44,7 @@ function createVoucherGateway() {
       });
     },
 
-    deleteVoucherBatch(token, { ids, groupId, lang, list }) {
+    deleteVoucherBatch(token, { ids, groupId, lang, accessToken, list }) {
       return upstreamRequest({
         method: 'DELETE',
         url: '/intlSamVoucher/v2/delete',
@@ -39,7 +52,8 @@ function createVoucherGateway() {
         params: {
           ids,
           group_id: groupId,
-          lang: lang || 'en'
+          lang: lang || 'en',
+          access_token: accessToken
         },
         data: list
       });

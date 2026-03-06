@@ -4,11 +4,13 @@ const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
 const YAML = require('yamljs');
 const asyncHandler = require('./middleware/asyncHandler');
+const { responseEnvelopeMiddleware, isBypassedPath } = require('./middleware/responseEnvelope');
 const createAuthCoreRoutes = require('./routes/authCoreRoutes');
 const createVoucherRoutes = require('./routes/voucherRoutes');
 const createPackageRoutes = require('./routes/packageRoutes');
 const createClientRoutes = require('./routes/clientRoutes');
 const createNetworkGroupRoutes = require('./routes/networkGroupRoutes');
+const createDemoRoutes = require('./routes/demoRoutes');
 const { createAppDependencies } = require('./modules/compositionRoot');
 const { initializeFirebase } = require('./firebase/firebase');
 
@@ -33,6 +35,27 @@ const networkGroupRoutes = createNetworkGroupRoutes({ networkGroupController });
 
 app.use(cors());
 app.use(express.json());
+app.use(responseEnvelopeMiddleware);
+
+app.use((req, res, next) => {
+  console.log('[Request]', {
+    method: req.method,
+    path: req.originalUrl,
+    headers: req.headers,
+    query: req.query,
+    body: req.body
+  });
+
+  res.on('finish', () => {
+    console.log('[Response]', {
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode
+    });
+  });
+
+  next();
+});
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -46,6 +69,8 @@ app.get('/login', (req, res) => {
 
 app.post('/login', asyncHandler(authController.login));
 
+app.use('/demo', createDemoRoutes());
+
 app.use('/auth/core', authCoreRoutes);
 app.use('/vouchers', voucherRoutes);
 app.use('/packages', packageRoutes);
@@ -58,16 +83,42 @@ app.use((req, res) => {
 });
 
 app.use((error, req, res, next) => {
-  const statusCode = error.statusCode || 500;
-  const payload = {
-    message: error.message || 'Internal server error'
-  };
+  let statusCode = error.statusCode || 500;
+  const details = error.details || null;
 
-  if (error.details) {
-    payload.details = error.details;
+  const isUsergroupNotSynced = Number(details?.voucherData?.code) === 1014;
+  const message = isUsergroupNotSynced
+    ? 'Selected usergroup is not synchronized yet.'
+    : (error.message || 'Internal server error');
+
+  if (isUsergroupNotSynced) {
+    statusCode = 409;
   }
 
-  res.status(statusCode).json(payload);
+  if (isBypassedPath(req.originalUrl, req.path)) {
+    const payload = {
+      message
+    };
+
+    if (details) {
+      payload.details = details;
+    }
+
+    res.status(statusCode).json(payload);
+    return;
+  }
+
+  res.status(statusCode).json({
+    success: false,
+    message,
+    error: {
+      httpStatus: statusCode,
+      code: isUsergroupNotSynced ? 'USERGROUP_NOT_SYNCED' : undefined,
+      resetRequired: isUsergroupNotSynced || undefined,
+      nextAction: isUsergroupNotSynced ? 'refresh_network_group_and_reselect' : undefined,
+      details
+    }
+  });
 });
 
 module.exports = app;

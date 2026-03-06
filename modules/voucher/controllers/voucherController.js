@@ -5,6 +5,11 @@ function createVoucherController({ voucherUseCases }) {
       res.json(data);
     },
 
+    async getVoucherStatus(req, res) {
+      const data = await voucherUseCases.getVoucherStatus(req.bearerToken, req.query);
+      res.json(data);
+    },
+
     async generateVoucher(req, res) {
       const data = await voucherUseCases.generateVoucher(req.bearerToken, req.body);
       res.json(data);

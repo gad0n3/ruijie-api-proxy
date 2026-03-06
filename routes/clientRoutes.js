@@ -7,11 +7,11 @@ function createClientRoutes({ clientController }) {
 
   router.use(bearerTokenMiddleware);
 
-  router.get('/online', asyncHandler(clientController.getOnlineClients));
+  router.get('/auth', asyncHandler(clientController.getAuthenticatedClients));
 
-  router.post('/offline', asyncHandler(clientController.setClientsOffline));
+  router.get('/unauth', asyncHandler(clientController.getUnauthenticatedClients));
 
-  router.get('/current-users', asyncHandler(clientController.getCurrentUsers));
+  router.get('/suspected', asyncHandler(clientController.getSuspectedClients));
 
   return router;
 }

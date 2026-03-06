@@ -98,12 +98,12 @@ async function upstreamRequest({ method, url, token, data, params, headers }) {
 
     return response.data;
   } catch (error) {
-    const statusCode = error.response?.status || 500;
+    const statusCode = error.statusCode || error.response?.status || 500;
     const message = error.response?.data?.message || error.message || 'Upstream request failed';
 
     const proxyError = new Error(message);
     proxyError.statusCode = statusCode;
-    proxyError.details = error.response?.data;
+    proxyError.details = error.details || error.response?.data;
     throw proxyError;
   }
 }

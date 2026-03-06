@@ -2,32 +2,21 @@ const { upstreamRequest } = require('../../../helpers/upstreamHttp');
 
 function createClientGateway() {
   return {
-    getOnlineClients(token, query) {
+    getCurrentUserList(token, { accessToken, groupId, pageIndex, pageSize }) {
       return upstreamRequest({
         method: 'GET',
-        url: '/clients/online',
+        url: '/open/v1/dev/user/current-user',
         token,
-        params: query
+        params: {
+          access_token: accessToken,
+          group_id: groupId,
+          page_index: pageIndex,
+          page_size: pageSize
+        }
       });
     },
 
-    setClientsOffline(token, payload) {
-      return upstreamRequest({
-        method: 'POST',
-        url: '/clients/offline',
-        token,
-        data: payload
-      });
-    },
-
-    getCurrentUsers(token, query) {
-      return upstreamRequest({
-        method: 'GET',
-        url: '/clients/current-users',
-        token,
-        params: query
-      });
-    }
+    
   };
 }
 
