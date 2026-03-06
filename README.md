@@ -91,7 +91,9 @@ APPID="YOUR_APP_ID" SECRET="YOUR_APP_SECRET" bash scripts/e2e-negative.sh
 
 ### Auth/Core
 - `POST /login` (alias)
+- `POST /login/vip` (alias)
 - `POST /auth/core/login`
+- `POST /auth/core/vip-login`
 - `GET /auth/core/projects`
 - `GET /auth/core/tenant`
 
@@ -120,6 +122,27 @@ After starting the server, open:
 Additional client integration doc:
 
 - `docs/client-docs.md` (Client API + AI-friendly integration contracts)
+- `docs/client-docs.ai.md` (AI-first deterministic contract copy)
+
+## Admin dashboard
+
+Small web dashboard for viewing login sessions and managing VIP login mapping.
+
+- URL: `http://localhost:3000/admin`
+- Data API: `GET /admin/api/logins`
+- Login API: `POST /admin/login` with `{ "username", "password" }`
+- Admin credentials are seeded into Firebase collection `admin_users` (configurable via `FIREBASE_ADMIN_COLLECTION`).
+- VIP credentials API (requires admin login):
+  - `GET /admin/api/vip-credentials`
+  - `POST /admin/api/vip-credentials` with `{ "username", "password", "appid", "secret" }`
+  - `DELETE /admin/api/vip-credentials/:username`
+- VIP credentials are stored in Firebase collection `vip_credentials` (configurable via `FIREBASE_VIP_CREDENTIAL_COLLECTION`).
+
+Default admin seed values (change in `.env` before production):
+
+- `ADMIN_USERNAME=admin`
+- `ADMIN_PASSWORD=admin12345`
+- `ADMIN_SESSION_SECRET=change-this-admin-session-secret`
 
 ## Example curl commands
 
@@ -140,6 +163,16 @@ The login response includes:
   - `access_code` (`null`)
 
 Use `data.authorization` directly for protected routes.
+
+### 1.1) VIP Login
+
+```bash
+curl -X POST http://localhost:3000/login/vip \
+  -H "Content-Type: application/json" \
+  -d '{"username":"vip_user_1","password":"vip_password_1"}'
+```
+
+VIP login returns the same login payload and authorization format as normal `/login`.
 
 ## Response envelope
 
@@ -180,6 +213,7 @@ Special mapped error:
 ## Detailed login flow
 
 1. Client calls `POST /login` (or `POST /auth/core/login`) with `appid` and `secret`.
+  - Alternative for end-user app auth: `POST /login/vip` (or `/auth/core/vip-login`) with VIP `username` and `password` mapped by admin.
 2. Proxy calls upstream:
    - `POST /oauth20/client/access_token?token=<RUIJIE_LOGIN_TOKEN>`
 3. Proxy extracts `access_token` from upstream response.

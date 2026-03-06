@@ -21,7 +21,18 @@ async function saveSessionByAppId(appid, payload) {
   }
 
   const collection = getCollection();
-  await collection.doc(String(appid)).set(payload);
+  const docRef = collection.doc(String(appid));
+  const existing = await docRef.get();
+  const existingData = existing.exists ? existing.data() : {};
+  const nowIso = new Date().toISOString();
+
+  await docRef.set({
+    ...existingData,
+    ...payload,
+    appid: String(appid),
+    createdAt: existingData.createdAt || nowIso,
+    updatedAt: nowIso
+  });
 }
 
 async function getSessionByAppId(appid) {
@@ -39,7 +50,30 @@ async function getSessionByAppId(appid) {
   return snapshot.data();
 }
 
+async function listSessions(limit = 200) {
+  const collection = getCollection();
+  const snapshot = await collection.get();
+
+  const rows = snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data()
+  }));
+
+  rows.sort((a, b) => {
+    const aTime = Date.parse(a.updatedAt || a.createdAt || 0);
+    const bTime = Date.parse(b.updatedAt || b.createdAt || 0);
+
+    if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+    if (Number.isNaN(aTime)) return 1;
+    if (Number.isNaN(bTime)) return -1;
+    return bTime - aTime;
+  });
+
+  return rows.slice(0, Number(limit) || 200);
+}
+
 module.exports = {
   saveSessionByAppId,
-  getSessionByAppId
+  getSessionByAppId,
+  listSessions
 };

@@ -21,6 +21,21 @@ function validateLoginCredentials(credentials) {
   }
 }
 
+function normalizeVipLoginPayload(payload) {
+  return {
+    username: payload?.username,
+    password: payload?.password
+  };
+}
+
+function validateVipLoginCredentials(credentials) {
+  if (!credentials.username || !credentials.password) {
+    const error = new Error('username and password are required.');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 function validateUpstreamLoginSuccess(loginResponse) {
   if (Number(loginResponse?.code) !== 0) {
     const error = new Error(loginResponse?.msg || 'Upstream login failed.');
@@ -55,37 +70,65 @@ function buildClientLoginResponse(sessionData) {
   };
 }
 
-function createAuthUseCases({ authGateway, sessionRepository }) {
+async function loginWithAppCredentials({ authGateway, sessionRepository }, credentials) {
+  const loginResponse = await authGateway.login(credentials);
+  validateUpstreamLoginSuccess(loginResponse);
+
+  const accessToken = getAccessToken(loginResponse);
+
+  if (!accessToken) {
+    const error = new Error('Upstream login succeeded without access_token.');
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const tenantResponse = await authGateway.getTenantInfo(accessToken);
+  validateTenantInfoSuccess(tenantResponse);
+
+  const sessionData = {
+    appid: loginResponse?.appid || credentials.appid,
+    secret: loginResponse?.secret || credentials.secret,
+    access_token: accessToken,
+    tenantName: tenantResponse.tenantName,
+    tenantId: tenantResponse.tenantId
+  };
+
+  await sessionRepository.saveByAppId(sessionData.appid, sessionData);
+
+  return buildClientLoginResponse(sessionData);
+}
+
+function createAuthUseCases({ authGateway, sessionRepository, vipCredentialRepository }) {
   return {
     async login(payload) {
       const credentials = normalizeLoginPayload(payload);
       validateLoginCredentials(credentials);
 
-      const loginResponse = await authGateway.login(credentials);
-      validateUpstreamLoginSuccess(loginResponse);
+      return loginWithAppCredentials({ authGateway, sessionRepository }, credentials);
+    },
 
-      const accessToken = getAccessToken(loginResponse);
+    async loginVip(payload) {
+      const credentials = normalizeVipLoginPayload(payload);
+      validateVipLoginCredentials(credentials);
 
-      if (!accessToken) {
-        const error = new Error('Upstream login succeeded without access_token.');
-        error.statusCode = 502;
+      if (!vipCredentialRepository || typeof vipCredentialRepository.verify !== 'function') {
+        const error = new Error('VIP credential repository is not configured.');
+        error.statusCode = 500;
         throw error;
       }
 
-      const tenantResponse = await authGateway.getTenantInfo(accessToken);
-      validateTenantInfoSuccess(tenantResponse);
+      const mapped = await vipCredentialRepository.verify(credentials.username, credentials.password);
 
-      const sessionData = {
-        appid: loginResponse?.appid || credentials.appid,
-        secret: loginResponse?.secret || credentials.secret,
-        access_token: accessToken,
-        tenantName: tenantResponse.tenantName,
-        tenantId: tenantResponse.tenantId
-      };
+      if (!mapped?.appid || !mapped?.secret) {
+        const error = new Error('Invalid VIP credentials');
+        error.statusCode = 401;
+        throw error;
+      }
 
-      await sessionRepository.saveByAppId(sessionData.appid, sessionData);
-
-      return buildClientLoginResponse(sessionData);
+      return loginWithAppCredentials({ authGateway, sessionRepository }, {
+        appid: mapped.appid,
+        secret: mapped.secret
+      });
     },
 
     getProjects(token) {

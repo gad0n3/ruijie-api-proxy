@@ -71,6 +71,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoginResponse'
+  /login/vip:
+    post:
+      tags: [Auth Core]
+      summary: Root VIP login alias (same behavior as /auth/core/vip-login)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VipLoginRequest'
+      responses:
+        '200':
+          description: VIP login success response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
   /auth/core/login:
     post:
       tags: [Auth Core]
@@ -85,6 +102,24 @@ paths:
       responses:
         '200':
           description: Login success response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /auth/core/vip-login:
+    post:
+      tags: [Auth Core]
+      summary: Login using VIP username/password mapped to appid/secret in Firebase
+      description: Accepts VIP credentials, resolves mapped Ruijie appid/secret from Firestore, then performs normal login and returns standard login payload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VipLoginRequest'
+      responses:
+        '200':
+          description: VIP login success response
           content:
             application/json:
               schema:
@@ -430,6 +465,83 @@ paths:
       responses:
         '200':
           description: Simplified group list
+  /admin/login:
+    post:
+      tags: [Admin]
+      summary: Login for admin dashboard
+      description: Verifies admin credentials from Firestore and sets HttpOnly admin session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginRequest'
+      responses:
+        '200':
+          description: Admin login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientSuccessEnvelope'
+  /admin/api/logins:
+    get:
+      tags: [Admin]
+      summary: List saved app login sessions with VIP marker
+      description: Requires admin cookie. Returns session list from Firestore session collection and marks rows as VIP if appid is mapped in VIP credentials collection.
+      responses:
+        '200':
+          description: Admin login-session list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientSuccessEnvelope'
+  /admin/api/vip-credentials:
+    get:
+      tags: [Admin]
+      summary: List VIP credential mappings
+      description: Requires admin cookie. Returns VIP username to appid mappings (secret is not returned).
+      responses:
+        '200':
+          description: VIP mapping list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientSuccessEnvelope'
+    post:
+      tags: [Admin]
+      summary: Create or update VIP credential mapping
+      description: Requires admin cookie. Stores VIP username/password (hashed) mapped to Ruijie appid/secret in Firestore.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VipCredentialUpsertRequest'
+      responses:
+        '200':
+          description: VIP mapping created/updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientSuccessEnvelope'
+  /admin/api/vip-credentials/{username}:
+    delete:
+      tags: [Admin]
+      summary: Delete VIP credential mapping
+      description: Requires admin cookie.
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: VIP mapping deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientSuccessEnvelope'
 components:
   schemas:
     ClientSuccessEnvelope:
@@ -527,6 +639,48 @@ components:
         access_code:
           nullable: true
           type: string
+    VipLoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: VIP username configured by admin dashboard
+        password:
+          type: string
+          description: VIP password configured by admin dashboard
+    AdminLoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    VipCredentialUpsertRequest:
+      type: object
+      required:
+        - username
+        - password
+        - appid
+        - secret
+      properties:
+        username:
+          type: string
+          description: VIP login username for client app
+        password:
+          type: string
+          description: VIP login password for client app
+        appid:
+          type: string
+          description: Ruijie appid mapped to this VIP credential
+        secret:
+          type: string
+          description: Ruijie secret mapped to this VIP credential
   responses:
     ProxyError:
       description: Standard proxy error body returned on failures.

@@ -5,6 +5,11 @@ function createAuthController({ authUseCases }) {
       res.json(data);
     },
 
+    async loginVip(req, res) {
+      const data = await authUseCases.loginVip(req.body);
+      res.json(data);
+    },
+
     async getProjects(req, res) {
       const data = await authUseCases.getProjects(req.bearerToken);
       res.json(data);

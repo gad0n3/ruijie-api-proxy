@@ -24,6 +24,10 @@ Apply these client-side updates:
   - `error.code=USERGROUP_NOT_SYNCED`
   - `error.resetRequired=true`
   - `error.nextAction=refresh_network_group_and_reselect`
+8. VIP login is supported for client apps:
+  - `POST /login/vip` (alias `POST /auth/core/vip-login`)
+  - request body: `{ username, password }`
+  - server maps VIP credentials to stored `appid/secret` and returns normal login response.
 
 ## Base URL
 
@@ -33,6 +37,7 @@ Apply these client-side updates:
 ## Authentication
 
 1. Call `POST /login` with `appid` and `secret`.
+  - Alternative: call `POST /login/vip` with VIP `username` and `password`.
 2. Read `authorization` from `response.data.data.authorization`.
 3. Send it as `Authorization` header on protected endpoints.
 
@@ -48,7 +53,16 @@ Authorization: Bearer <appid>::<access_token>
 
 ### Auth
 - `POST /login`
+- `POST /login/vip`
 - `POST /auth/core/login` (alias)
+- `POST /auth/core/vip-login` (alias)
+
+### Admin (Dashboard only)
+- `POST /admin/login`
+- `GET /admin/api/logins`
+- `GET /admin/api/vip-credentials`
+- `POST /admin/api/vip-credentials`
+- `DELETE /admin/api/vip-credentials/{username}`
 
 ### Network Group
 - `GET /network_group`
@@ -122,6 +136,7 @@ Packages list pagination note:
 | Step | Endpoint | Auth header | Request body/query | Read from `response.data` |
 |---|---|---|---|---|
 | 1 | `POST /login` | No | body: `appid`, `secret` | `authorization` |
+| 1a | `POST /login/vip` | No | body: `username`, `password` | `authorization` |
 | 2 | `GET /network_group` | Yes | none | `Array<{name, groupId}>` |
 | 3 | `GET /packages` | Yes | query: `groupId` | object with package rows |
 | 4 | `POST /packages/create` | Yes | package payload | created package object |
@@ -237,6 +252,32 @@ Actual HTTP response is wrapped by the global envelope:
 ```
 
 ### Response
+
+```json
+{
+  "appid": "opena305a89b2d79",
+  "secret": "63899898099e42c3b5bfef8d9325e008",
+  "authorization": "Bearer opena305a89b2d79::RFH8oE1I0n1p2n5of6d3k5p8n4U8oC3j",
+  "access_code": null
+}
+```
+
+## 1.1) VIP Login
+
+`POST /login/vip` (alias `POST /auth/core/vip-login`)
+
+### Request
+
+```json
+{
+  "username": "vip_user_1",
+  "password": "vip_password_1"
+}
+```
+
+### Response
+
+Same as login response. The proxy resolves VIP credentials to mapped `appid/secret` and returns:
 
 ```json
 {

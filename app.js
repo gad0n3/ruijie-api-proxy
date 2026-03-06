@@ -11,10 +11,17 @@ const createPackageRoutes = require('./routes/packageRoutes');
 const createClientRoutes = require('./routes/clientRoutes');
 const createNetworkGroupRoutes = require('./routes/networkGroupRoutes');
 const createDemoRoutes = require('./routes/demoRoutes');
+const createAdminRoutes = require('./routes/adminRoutes');
+const { ensureDefaultAdminCredentials } = require('./infrastructure/adminStore');
 const { createAppDependencies } = require('./modules/compositionRoot');
 const { initializeFirebase } = require('./firebase/firebase');
 
 initializeFirebase();
+ensureDefaultAdminCredentials().catch((error) => {
+  console.error('[AdminAuth] Failed to ensure default admin credentials', {
+    message: error.message
+  });
+});
 
 const swaggerDocument = YAML.load(path.join(__dirname, 'docs', 'openapi.yaml'));
 
@@ -68,8 +75,10 @@ app.get('/login', (req, res) => {
 });
 
 app.post('/login', asyncHandler(authController.login));
+app.post('/login/vip', asyncHandler(authController.loginVip));
 
 app.use('/demo', createDemoRoutes());
+app.use('/admin', createAdminRoutes());
 
 app.use('/auth/core', authCoreRoutes);
 app.use('/vouchers', voucherRoutes);

@@ -20,5 +20,15 @@ module.exports = {
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
     privateKey: process.env.FIREBASE_PRIVATE_KEY || '',
     serviceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || ''
+  },
+  adminAuth: {
+    collection: process.env.FIREBASE_ADMIN_COLLECTION || 'admin_users',
+    defaultUsername: process.env.ADMIN_USERNAME || 'admin',
+    defaultPassword: process.env.ADMIN_PASSWORD || 'admin12345',
+    sessionSecret: process.env.ADMIN_SESSION_SECRET || 'change-this-admin-session-secret',
+    sessionTtlSeconds: Number(process.env.ADMIN_SESSION_TTL_SECONDS || 43200)
+  },
+  vipAuth: {
+    collection: process.env.FIREBASE_VIP_CREDENTIAL_COLLECTION || 'vip_credentials'
   }
 };
