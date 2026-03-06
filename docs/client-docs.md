@@ -3,6 +3,28 @@
 This guide is the client integration companion to `docs/openapi.yaml`.
 It is optimized for app client implementation and AI-assisted code generation.
 
+## Client Release Notes
+
+Apply these client-side updates:
+
+1. All API routes use envelope responses:
+  - success: `{ success, message, data, meta }`
+  - error: `{ success:false, message, error:{ httpStatus, details } }`
+2. Read login token from `response.data.data.authorization`.
+3. Do not send `lang` from client requests.
+4. `GET /packages` now accepts only `groupId`.
+  - Server fixes upstream pagination to `pageIndex=1`, `pageSize=20`.
+5. New endpoint: `GET /vouchers/status?groupId=`.
+6. Client traffic fields changed:
+  - `flowUp` and `flowDown` are formatted strings with `-MB` / `-GB` suffix.
+  - `duration` is `HH:MM`.
+  - `flowUpDown` is removed from suspected client response payload.
+7. Unsynchronized group mapping is stable:
+  - uplink `voucherData.code=1014` -> HTTP `409`
+  - `error.code=USERGROUP_NOT_SYNCED`
+  - `error.resetRequired=true`
+  - `error.nextAction=refresh_network_group_and_reselect`
+
 ## Base URL
 
 - Local: `http://localhost:3000`
