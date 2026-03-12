@@ -1,19 +1,31 @@
-const express = require('express');
-const asyncHandler = require('../middleware/asyncHandler');
-const bearerTokenMiddleware = require('../middleware/bearerToken');
+const express = require("express");
+const asyncHandler = require("../middleware/asyncHandler");
+const bearerTokenMiddleware = require("../middleware/bearerToken");
 
 function createVoucherRoutes({ voucherController }) {
   const router = express.Router();
 
   router.use(bearerTokenMiddleware);
 
-  router.get('/', asyncHandler(voucherController.listVouchers));
+  router.get("/active", asyncHandler(voucherController.listActiveVouchers));
 
-  router.get('/status', asyncHandler(voucherController.getVoucherStatus));
+  router.get("/remain", asyncHandler(voucherController.listRemainVouchers));
 
-  router.post('/generate', asyncHandler(voucherController.generateVoucher));
+  router.get("/expired", asyncHandler(voucherController.listExpiredVouchers));
 
-  router.delete('/expired', asyncHandler(voucherController.deleteExpiredVouchers));
+  router.get("/status", asyncHandler(voucherController.getVoucherStatus));
+
+  router.get(
+    "/performance",
+    asyncHandler(voucherController.getVoucherPerformance),
+  );
+
+  router.post("/generate", asyncHandler(voucherController.generateVoucher));
+
+  router.delete(
+    "/expired",
+    asyncHandler(voucherController.deleteExpiredVouchers),
+  );
 
   return router;
 }

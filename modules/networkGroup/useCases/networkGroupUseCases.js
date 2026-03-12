@@ -1,19 +1,10 @@
-function extractAccessToken(token) {
-  if (!token) {
-    return '';
-  }
-
-  const parts = String(token).split('::');
-
-  if (parts.length === 2) {
-    return parts[1].trim();
-  }
-
-  return String(token).trim();
-}
+const {
+  extractAccessToken,
+  resolveAuthenticatedSession,
+} = require("../../../helpers/tokenParser");
 
 function collectLeafGroups(node) {
-  if (!node || typeof node !== 'object') {
+  if (!node || typeof node !== "object") {
     return [];
   }
 
@@ -27,8 +18,8 @@ function collectLeafGroups(node) {
     return [
       {
         name: node.name,
-        groupId: node.groupId
-      }
+        groupId: node.groupId,
+      },
     ];
   }
 
@@ -37,26 +28,37 @@ function collectLeafGroups(node) {
 
 function validateGroupTreeResponse(response) {
   if (Number(response?.code) !== 0) {
-    const error = new Error(response?.msg || 'Failed to get network groups from upstream.');
+    const error = new Error(
+      response?.msg || "Failed to get network groups from upstream.",
+    );
     error.statusCode = 502;
     error.details = response;
     throw error;
   }
 }
 
-function createNetworkGroupUseCases({ networkGroupGateway }) {
+function createNetworkGroupUseCases({
+  networkGroupGateway,
+  networkGroupSessionRepository,
+}) {
   return {
     async listNetworkGroups(token) {
-      const accessToken = extractAccessToken(token);
-      const upstreamResponse = await networkGroupGateway.getGroupTree(token, accessToken);
+      const { accessToken } = await resolveAuthenticatedSession(
+        token,
+        networkGroupSessionRepository,
+      );
+      const upstreamResponse = await networkGroupGateway.getGroupTree(
+        token,
+        accessToken,
+      );
 
       validateGroupTreeResponse(upstreamResponse);
 
       return collectLeafGroups(upstreamResponse?.groups);
-    }
+    },
   };
 }
 
 module.exports = {
-  createNetworkGroupUseCases
+  createNetworkGroupUseCases,
 };

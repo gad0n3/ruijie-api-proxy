@@ -1,10 +1,11 @@
-const axios = require('axios');
-const config = require('../config');
-const { getSessionByAppId } = require('../infrastructure/sessionStore');
+const axios = require("axios");
+const config = require("../config");
+const { getSessionByAppId } = require("../infrastructure/sessionStore");
+const { parseCompositeBearerToken } = require("./tokenParser");
 
 const upstreamClient = axios.create({
   baseURL: config.upstreamBaseUrl,
-  timeout: config.upstreamTimeoutMs
+  timeout: config.upstreamTimeoutMs,
 });
 
 function buildAuthHeader(token) {
@@ -12,34 +13,9 @@ function buildAuthHeader(token) {
   return { Authorization: `Bearer ${token}` };
 }
 
-function parseCompositeBearerToken(token) {
-  if (!token || !token.includes('::')) {
-    return null;
-  }
-
-  const parts = token.split('::');
-
-  if (parts.length !== 2) {
-    const error = new Error('Invalid bearer token format. Expected appid::token.');
-    error.statusCode = 401;
-    throw error;
-  }
-
-  const appid = parts[0].trim();
-  const accessToken = parts[1].trim();
-
-  if (!appid || !accessToken) {
-    const error = new Error('Invalid bearer token format. Expected appid::token.');
-    error.statusCode = 401;
-    throw error;
-  }
-
-  return { appid, accessToken };
-}
-
 async function resolveUpstreamAuthContext(token) {
   if (!token) {
-    return { upstreamAccessToken: '', authHeaders: {} };
+    return { upstreamAccessToken: "", authHeaders: {} };
   }
 
   const composite = parseCompositeBearerToken(token);
@@ -47,20 +23,24 @@ async function resolveUpstreamAuthContext(token) {
   if (!composite) {
     return {
       upstreamAccessToken: token,
-      authHeaders: buildAuthHeader(token)
+      authHeaders: buildAuthHeader(token),
     };
   }
 
   const session = await getSessionByAppId(composite.appid);
 
   if (!session) {
-    const error = new Error('Session not found for provided appid. Please login again.');
+    const error = new Error(
+      "Session not found for provided appid. Please login again.",
+    );
     error.statusCode = 401;
     throw error;
   }
 
   if (session.access_token !== composite.accessToken) {
-    const error = new Error('Bearer token is invalid or expired. Please login again.');
+    const error = new Error(
+      "Bearer token is invalid or expired. Please login again.",
+    );
     error.statusCode = 401;
     throw error;
   }
@@ -70,14 +50,16 @@ async function resolveUpstreamAuthContext(token) {
     authHeaders: {
       ...buildAuthHeader(composite.accessToken),
       appid: session.appid || composite.appid,
-      secret: session.secret || ''
-    }
+      secret: session.secret || "",
+    },
   };
 }
 
 async function upstreamRequest({ method, url, token, data, params, headers }) {
   if (!config.upstreamBaseUrl) {
-    const error = new Error('Upstream URL is not configured. Set UPSTREAM_BASE_URL (or RUIJIE_UPSTREAM_BASE_URL / UPSTREAM_URL) in .env.');
+    const error = new Error(
+      "Upstream URL is not configured. Set UPSTREAM_BASE_URL (or RUIJIE_UPSTREAM_BASE_URL / UPSTREAM_URL) in .env.",
+    );
     error.statusCode = 500;
     throw error;
   }
@@ -92,14 +74,17 @@ async function upstreamRequest({ method, url, token, data, params, headers }) {
       params,
       headers: {
         ...authContext.authHeaders,
-        ...(headers || {})
-      }
+        ...(headers || {}),
+      },
     });
 
     return response.data;
   } catch (error) {
     const statusCode = error.statusCode || error.response?.status || 500;
-    const message = error.response?.data?.message || error.message || 'Upstream request failed';
+    const message =
+      error.response?.data?.message ||
+      error.message ||
+      "Upstream request failed";
 
     const proxyError = new Error(message);
     proxyError.statusCode = statusCode;
@@ -109,5 +94,5 @@ async function upstreamRequest({ method, url, token, data, params, headers }) {
 }
 
 module.exports = {
-  upstreamRequest
+  upstreamRequest,
 };

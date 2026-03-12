@@ -1,29 +1,34 @@
-const path = require('path');
-const express = require('express');
-const cors = require('cors');
-const swaggerUi = require('swagger-ui-express');
-const YAML = require('yamljs');
-const asyncHandler = require('./middleware/asyncHandler');
-const { responseEnvelopeMiddleware, isBypassedPath } = require('./middleware/responseEnvelope');
-const createAuthCoreRoutes = require('./routes/authCoreRoutes');
-const createVoucherRoutes = require('./routes/voucherRoutes');
-const createPackageRoutes = require('./routes/packageRoutes');
-const createClientRoutes = require('./routes/clientRoutes');
-const createNetworkGroupRoutes = require('./routes/networkGroupRoutes');
-const createDemoRoutes = require('./routes/demoRoutes');
-const createAdminRoutes = require('./routes/adminRoutes');
-const { ensureDefaultAdminCredentials } = require('./infrastructure/adminStore');
-const { createAppDependencies } = require('./modules/compositionRoot');
-const { initializeFirebase } = require('./firebase/firebase');
+const path = require("path");
+const express = require("express");
+const cors = require("cors");
+const swaggerUi = require("swagger-ui-express");
+const YAML = require("yamljs");
+const asyncHandler = require("./middleware/asyncHandler");
+const {
+  responseEnvelopeMiddleware,
+  isBypassedPath,
+} = require("./middleware/responseEnvelope");
+const createAuthRoutes = require("./routes/authRoutes");
+const createVoucherRoutes = require("./routes/voucherRoutes");
+const createPackageRoutes = require("./routes/packageRoutes");
+const createClientRoutes = require("./routes/clientRoutes");
+const createNetworkGroupRoutes = require("./routes/networkGroupRoutes");
+const createDemoRoutes = require("./routes/demoRoutes");
+const createAdminRoutes = require("./routes/adminRoutes");
+const {
+  ensureDefaultAdminCredentials,
+} = require("./infrastructure/adminStore");
+const { createAppDependencies } = require("./modules/compositionRoot");
+const { initializeFirebase } = require("./firebase/firebase");
 
 initializeFirebase();
 ensureDefaultAdminCredentials().catch((error) => {
-  console.error('[AdminAuth] Failed to ensure default admin credentials', {
-    message: error.message
+  console.error("[AdminAuth] Failed to ensure default admin credentials", {
+    message: error.message,
   });
 });
 
-const swaggerDocument = YAML.load(path.join(__dirname, 'docs', 'openapi.yaml'));
+const swaggerDocument = YAML.load(path.join(__dirname, "docs", "openapi.yaml"));
 
 const app = express();
 const {
@@ -31,13 +36,16 @@ const {
   voucherController,
   packageController,
   clientController,
-  networkGroupController
+  networkGroupController,
 } = createAppDependencies();
 
-const authCoreRoutes = createAuthCoreRoutes({ authController });
+const authRoutes = createAuthRoutes({ authController });
 const voucherRoutes = createVoucherRoutes({ voucherController });
 const packageRoutes = createPackageRoutes({ packageController });
-const clientRoutes = createClientRoutes({ clientController });
+const clientRoutes = createClientRoutes({
+  clientController,
+  voucherController,
+});
 const networkGroupRoutes = createNetworkGroupRoutes({ networkGroupController });
 
 app.use(cors());
@@ -45,50 +53,50 @@ app.use(express.json());
 app.use(responseEnvelopeMiddleware);
 
 app.use((req, res, next) => {
-  console.log('[Request]', {
+  console.log("[Request]", {
     method: req.method,
     path: req.originalUrl,
     headers: req.headers,
     query: req.query,
-    body: req.body
+    body: req.body,
   });
 
-  res.on('finish', () => {
-    console.log('[Response]', {
+  res.on("finish", () => {
+    console.log("[Response]", {
       method: req.method,
       path: req.originalUrl,
-      status: res.statusCode
+      status: res.statusCode,
     });
   });
 
   next();
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
-app.get('/login', (req, res) => {
+app.get("/login", (req, res) => {
   res.status(405).json({
-    message: 'Use POST /login with JSON body: { ruijie_id, ruijie_secret }'
+    message: "Use POST /login with JSON body: { ruijie_id, ruijie_secret }",
   });
 });
 
-app.post('/login', asyncHandler(authController.login));
-app.post('/login/vip', asyncHandler(authController.loginVip));
+app.post("/login", asyncHandler(authController.login));
+app.post("/login/vip", asyncHandler(authController.loginVip));
 
-app.use('/demo', createDemoRoutes());
-app.use('/admin', createAdminRoutes());
+app.use("/demo", createDemoRoutes());
+app.use("/admin", createAdminRoutes());
 
-app.use('/auth/core', authCoreRoutes);
-app.use('/vouchers', voucherRoutes);
-app.use('/packages', packageRoutes);
-app.use('/clients', clientRoutes);
-app.use('/network_group', networkGroupRoutes);
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+app.use("/auth/core", authRoutes);
+app.use("/vouchers", voucherRoutes);
+app.use("/packages", packageRoutes);
+app.use("/clients", clientRoutes);
+app.use("/network_group", networkGroupRoutes);
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  res.status(404).json({ message: "Route not found" });
 });
 
 app.use((error, req, res, next) => {
@@ -97,8 +105,8 @@ app.use((error, req, res, next) => {
 
   const isUsergroupNotSynced = Number(details?.voucherData?.code) === 1014;
   const message = isUsergroupNotSynced
-    ? 'Selected usergroup is not synchronized yet.'
-    : (error.message || 'Internal server error');
+    ? "Selected usergroup is not synchronized yet."
+    : error.message || "Internal server error";
 
   if (isUsergroupNotSynced) {
     statusCode = 409;
@@ -106,7 +114,7 @@ app.use((error, req, res, next) => {
 
   if (isBypassedPath(req.originalUrl, req.path)) {
     const payload = {
-      message
+      message,
     };
 
     if (details) {
@@ -122,11 +130,13 @@ app.use((error, req, res, next) => {
     message,
     error: {
       httpStatus: statusCode,
-      code: isUsergroupNotSynced ? 'USERGROUP_NOT_SYNCED' : undefined,
+      code: isUsergroupNotSynced ? "USERGROUP_NOT_SYNCED" : undefined,
       resetRequired: isUsergroupNotSynced || undefined,
-      nextAction: isUsergroupNotSynced ? 'refresh_network_group_and_reselect' : undefined,
-      details
-    }
+      nextAction: isUsergroupNotSynced
+        ? "refresh_network_group_and_reselect"
+        : undefined,
+      details,
+    },
   });
 });
 

@@ -1,26 +1,30 @@
-const { createAuthGateway } = require('./gateways/authGateway');
-const { createSessionRepository } = require('./repositories/sessionRepository');
-const { createVipCredentialRepository } = require('./repositories/vipCredentialRepository');
-const { createAuthUseCases } = require('./useCases/authUseCases');
-const { createAuthController } = require('./controllers/authController');
+const { createAuthGateway } = require("./gateways/authGateway");
+const {
+  createAuthSessionRepository,
+} = require("./repositories/sessionRepository");
+const {
+  createVipCredentialRepository,
+} = require("./repositories/vipCredentialRepository");
+const { createAuthUseCases } = require("./useCases/authUseCases");
+const { createAuthController } = require("./controllers/authController");
 
 function createAuthModule() {
   const authGateway = createAuthGateway();
-  const sessionRepository = createSessionRepository();
+  const authSessionRepository = createAuthSessionRepository();
   const vipCredentialRepository = createVipCredentialRepository();
   const authUseCases = createAuthUseCases({
     authGateway,
-    sessionRepository,
-    vipCredentialRepository
+    sessionRepository: authSessionRepository,
+    vipCredentialRepository,
   });
   const authController = createAuthController({ authUseCases });
 
   return {
     authUseCases,
-    authController
+    authController,
   };
 }
 
 module.exports = {
-  createAuthModule
+  createAuthModule,
 };

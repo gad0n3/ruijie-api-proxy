@@ -1,13 +1,13 @@
-const { saveSessionByAppId } = require('../../../infrastructure/sessionStore');
+const { saveSessionByAppId } = require("../../../infrastructure/sessionStore");
 
-function createSessionRepository() {
+function createAuthSessionRepository() {
   return {
     saveByAppId(appid, payload) {
       return saveSessionByAppId(appid, payload);
-    }
+    },
   };
 }
 
 module.exports = {
-  createSessionRepository
+  createAuthSessionRepository,
 };

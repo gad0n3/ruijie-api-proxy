@@ -1,17 +1,21 @@
-const express = require('express');
-const asyncHandler = require('../middleware/asyncHandler');
-const bearerTokenMiddleware = require('../middleware/bearerToken');
+const express = require("express");
+const asyncHandler = require("../middleware/asyncHandler");
+const bearerTokenMiddleware = require("../middleware/bearerToken");
 
-function createClientRoutes({ clientController }) {
+function createClientRoutes({ clientController, voucherController }) {
   const router = express.Router();
 
   router.use(bearerTokenMiddleware);
 
-  router.get('/auth', asyncHandler(clientController.getAuthenticatedClients));
+  // Refactored: GET /clients (previously GET /clients/auth)
+  router.get("/", asyncHandler(clientController.listClients));
 
-  router.get('/unauth', asyncHandler(clientController.getUnauthenticatedClients));
+  // Print unused vouchers (delegates to voucher module)
+  router.post("/print", asyncHandler(voucherController.printUnusedVouchers));
 
-  router.get('/suspected', asyncHandler(clientController.getSuspectedClients));
+  // Removed:
+  // - GET /unauth
+  // - GET /suspected
 
   return router;
 }
