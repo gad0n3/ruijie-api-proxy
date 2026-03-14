@@ -1,182 +1,53 @@
-# Ruijie API Proxy (Client API Docs)
+# Ruijie API Proxy - Client Integration Guide
 
-This guide is the client integration companion to `docs/openapi.yaml`.
-It is optimized for app client implementation and AI-assisted code generation.
+This document provides a comprehensive reference for integrating with the Ruijie API Proxy. It is designed for frontend developers and AI agents implementing client-side logic.
 
-## Client Release Notes
+## Overview
 
-Apply these client-side updates:
-
-1. All API routes use envelope responses:
-   - success: `{ success, message, data, meta }`
-   - error: `{ success:false, message, error:{ httpStatus, details } }`
-2. Read login token from `response.data.authorization`.
-3. Do not send `lang` from client requests.
-4. `GET /packages` now accepts only `groupId`.
-   - Server fixes upstream pagination to `pageIndex=1`, `pageSize=20`.
-5. Voucher endpoints refactored:
-   - `GET /vouchers/active` (status=2, inuse)
-   - `GET /vouchers/remain` (status=1, unused)
-   - `GET /vouchers/expired` (status=3, expired)
-   - All voucher lists are grouped by date.
-6. `DELETE /vouchers/expired` now auto-fetches expired vouchers (no request body required).
-7. Client response simplified to: `{mac, staModel, ip, duration}`
-   - MAC format: uppercase with colons (e.g., `FF:10:15:10:51:1A`)
-   - Duration format: `HH:MM`
-8. Client endpoints consolidated:
-   - `GET /clients` (authenticated clients only)
-   - Removed: `/clients/unauth`, `/clients/suspected`
-9. New endpoints:
-   - `GET /vouchers/performance?groupId=` - business metrics (last day & monthly)
-   - `POST /clients/print` - fetch unused vouchers not yet printed
-10. Unsynchronized group mapping is stable:
-    - uplink `voucherData.code=1014` -> HTTP `409`
-    - `error.code=USERGROUP_NOT_SYNCED`
-    - `error.resetRequired=true`
-    - `error.nextAction=refresh_network_group_and_reselect`
-11. VIP login is supported for client apps:
-    - `POST /login/vip` (alias `POST /auth/core/vip-login`)
-    - request body: `{ username, password }`
-    - server maps VIP credentials to stored `appid/secret` and returns normal login response.
-
-## Base URL
-
-- Local: `http://localhost:3000`
-- Production: `https://<your-server-host>`
-
-## Authentication
-
-1. Call `POST /login` with `appid` and `secret`.
-   - Alternative: call `POST /login/vip` with VIP `username` and `password`.
-2. Read `authorization` from `response.data.authorization`.
-3. Send it as `Authorization` header on protected endpoints.
-
-Header format:
-
-```http
-Authorization: Bearer <appid>::<access_token>
-```
+The Ruijie API Proxy acts as a middle layer between client applications and the Ruijie Cloud upstream services. It provides:
+- **Standardized Response Envelopes**: Consistent JSON structure for all responses.
+- **Simplified Authentication**: Token-based access with session persistence in Firebase.
+- **Enhanced Data Formatting**: Human-readable speeds, durations, and MAC addresses.
+- **Clean Architecture**: Decoupled modules and semantic error handling.
 
 ---
 
-## Quick Endpoint Map
+## 1. Authentication Flow
 
-### Auth
-- `POST /login`
-- `POST /login/vip`
-- `POST /auth/core/login` (alias)
-- `POST /auth/core/vip-login` (alias)
-- `GET /auth/core/projects`
-- `GET /auth/core/tenant`
+### 1.1 Initial Login
+Clients must authenticate using either standard Ruijie app credentials or a VIP username mapping.
 
-### Admin (Dashboard only)
-- `POST /admin/login`
-- `GET /admin/api/logins`
-- `GET /admin/api/vip-credentials`
-- `POST /admin/api/vip-credentials`
-- `DELETE /admin/api/vip-credentials/:username`
+| Endpoint | Method | Payload | Description |
+| :--- | :--- | :--- | :--- |
+| `/login` | `POST` | `{ "appid": "...", "secret": "..." }` | Standard login. Alias: `/auth/core/login` |
+| `/login/vip` | `POST` | `{ "username": "...", "password": "..." }` | VIP mapping login. Alias: `/auth/core/vip-login` |
 
-### Network Group
-- `GET /network_group`
+### 1.2 Using the Token
+Upon success, the API returns an `authorization` string inside the `data` block.
 
-### Packages (Usergroup)
-- `GET /packages?groupId=`
-- `POST /packages/create`
-- `POST /packages/:groupId`
-- `DELETE /packages/:uuid?groupId=&packageId=&authProfileId=`
-
-### Vouchers
-- `GET /vouchers/active?groupId=&start=&pageSize=`
-- `GET /vouchers/remain?groupId=&start=&pageSize=`
-- `GET /vouchers/expired?groupId=&start=&pageSize=`
-- `GET /vouchers/status?groupId=`
-- `GET /vouchers/performance?groupId=`
-- `POST /vouchers/generate`
-- `DELETE /vouchers/expired?groupId=`
-
-### Clients
-- `GET /clients?group_id=&page_index=&page_size=`
-- `POST /clients/print`
-
----
-
-## AI Handoff: Deterministic API Flow
-
-Use this section as machine-readable behavior guidance for another AI agent.
-
-### Required runtime state (client side)
-
+**Example Response:**
 ```json
 {
-  "baseUrl": "http://localhost:3000",
-  "authorization": "Bearer <appid>::<access_token>",
-  "selectedGroupId": 8597889,
-  "selectedPackage": {
-    "id": 504690,
-    "authProfileId": "07271539267689731897455769202751"
+  "success": true,
+  "data": {
+    "authorization": "Bearer 12345::abcde12345token",
+    "appid": "12345",
+    "tenantName": "ExampleCorp"
   }
 }
 ```
 
-### Strict execution order
-
-1. `POST /login` with `{ appid, secret }`.
-2. Read token from `response.data.authorization` and store it.
-3. Call `GET /network_group` with `Authorization` header.
-4. Pick `groupId`.
-5. Call `GET /packages?groupId=...`.
-6. If creating vouchers: resolve `package.id` + `package.authProfileId`.
-7. Call `POST /vouchers/generate`.
-8. Optionally call voucher list endpoints (`/active`, `/remain`, `/expired`).
-9. Optionally call `GET /vouchers/status` or `GET /vouchers/performance`.
-10. Optionally call `DELETE /vouchers/expired` (auto-fetch, no body).
-11. For client monitor screens, call `GET /clients`.
-12. For printing vouchers, call `POST /clients/print`.
-
-Language note:
-- Client does not send `lang`.
-- Server applies default language internally (`en`).
-
-Packages list pagination note:
-- Client does not send `pageIndex` or `pageSize`.
-- Server uses fixed upstream values: `pageIndex=1`, `pageSize=20`.
-
-### Response parsing rules (must-follow)
-
-1. Every API response is an envelope: `{ success, message, data, meta }`.
-2. Business payload is always `response.data` (inside envelope).
-3. Never read top-level fields like `authorization` directly from root response.
-4. Error envelope is `{ success:false, message, error:{ httpStatus, details } }`.
-
-### Endpoint I/O summary for AI agents
-
-| Step | Endpoint | Auth header | Request body/query | Read from `response.data` |
-|---|---|---|---|---|
-| 1 | `POST /login` | No | body: `appid`, `secret` | `authorization` |
-| 1a | `POST /login/vip` | No | body: `username`, `password` | `authorization` |
-| 2 | `GET /network_group` | Yes | none | `Array<{name, groupId}>` |
-| 3 | `GET /packages` | Yes | query: `groupId` | object with package rows |
-| 4 | `POST /packages/create` | Yes | package payload | created package object |
-| 5 | `POST /packages/:groupId` | Yes | update payload | `{code,msg}` style payload |
-| 6 | `DELETE /packages/:uuid` | Yes | query: `groupId,packageId,authProfileId` | `{code,msg}` style payload |
-| 7 | `GET /vouchers/active` | Yes | query: `groupId,start,pageSize` | `Array<{date,timeType,vouchers}>` |
-| 8 | `GET /vouchers/remain` | Yes | query: `groupId,start,pageSize` | `Array<{date,timeType,vouchers}>` |
-| 9 | `GET /vouchers/expired` | Yes | query: `groupId,start,pageSize` | `Array<{date,timeType,vouchers}>` |
-| 10 | `GET /vouchers/status` | Yes | query: `groupId` | `{expired,total,used}` |
-| 11 | `GET /vouchers/performance` | Yes | query: `groupId` | `{lastDay:{count,price},monthly:{count,price}}` |
-| 12 | `POST /vouchers/generate` | Yes | body: `groupId,userGroupId,profile,count` | `{count,list}` |
-| 13 | `DELETE /vouchers/expired` | Yes | query: `groupId` | `{code,msg,deletedCount,batchCount,expiredVouchers}` |
-| 14 | `GET /clients` | Yes | query: `group_id,page_index,page_size` | `{list:[{mac,staModel,ip,duration}]}` |
-| 15 | `POST /clients/print` | Yes | body: `groupId,voucherCount,voucherList` | `Array<{date,timeType,vouchers}>` |
+**Client Requirement:**
+Send this exact string in the `Authorization` header for all protected requests.
+`Authorization: Bearer <appid>::<access_token>`
 
 ---
 
-## Client Response Contract
+## 2. Response Standard (The Envelope)
 
-All API endpoints now return a consistent envelope from the server (including `/demo/*` and `/health`).
+Every API request (except `/docs` and raw HTML) returns a consistent envelope.
 
-### Success envelope
-
+### 2.1 Success Envelope
 ```json
 {
   "success": true,
@@ -185,662 +56,188 @@ All API endpoints now return a consistent envelope from the server (including `/
   "meta": {}
 }
 ```
+- `data`: Contains the actual business payload.
+- `meta`: Optional pagination or summary data.
 
-### Error envelope
-
+### 2.2 Error Envelope
 ```json
 {
   "success": false,
-  "message": "Human readable message",
+  "message": "Meaningful error description",
   "error": {
     "httpStatus": 400,
-    "details": {}
+    "name": "ValidationError",
+    "details": {},
+    "code": "OPTIONAL_ERROR_CODE",
+    "nextAction": "suggested_client_fix"
   }
 }
 ```
 
-### Data mapping used by server
+---
 
-| Endpoint group | Internal source shape | Returned `data` |
-|---|---|---|
-| Login | object | full object |
-| Network Group | array | same array |
-| Package list | `{ code, msg, data, count }` | `data` array, with `meta.count` |
-| Package create | object | full object |
-| Package update/delete | `{ code, msg }` | full object |
-| Voucher list | grouped array | array of `{date,timeType,vouchers:[...]}` |
-| Voucher generate | `{ count, list }` | full object |
-| Voucher delete | `{ code, msg, deletedCount, batchCount, expiredVouchers }` | full object |
-| Voucher status | `{ expired, total, used }` | full object |
-| Voucher performance | `{ lastDay, monthly }` | full object |
-| Clients | `{ list: [] }` | `list` array (unwrapped by middleware) |
+## 3. API Reference
+
+### 3.1 Network Groups
+
+| Endpoint | Method | Response |
+| :--- | :--- | :--- |
+| `/network_group` | `GET` | `[{ "name": "SUEWIN", "groupId": 7682332 }]` |
 
 ---
 
-## Uplink Integration Reference
+### 3.2 Packages
 
-Proxy uplink configuration:
-- Base URL comes from `UPSTREAM_BASE_URL` (or `RUIJIE_UPSTREAM_BASE_URL` / `UPSTREAM_URL`)
-- Timeout comes from `UPSTREAM_TIMEOUT_MS`
+| Endpoint | Method | Query/Params | Description |
+| :--- | :--- | :--- | :--- |
+| `/packages` | `GET` | `groupId` | List all packages for a group. |
+| `/packages/create` | `POST` | (Body) | Create Auth Profile + User Group. |
+| `/packages/:groupId` | `POST` | (Body) | Update package group settings. |
+| `/packages/:uuid` | `DELETE` | `groupId`, `packageId` | Delete the package and its auth profile. |
 
-Uplink auth behavior:
-- Proxy login uplink call uses request headers `appid` and `secret`
-- Protected uplink calls use `Authorization: Bearer <access_token>` plus query `access_token`
-- For composite client token `Bearer <appid>::<access_token>`, proxy resolves Firebase session (`start/{appid}`)
+**Package Data Shape:**
+```json
+{
+    "id": 511370,
+    "name": "1D @ 10MBPS",
+    "userGroupName": "1D @ 10MBPS",
+    "authProfileId": "33823184226299113976475400805322",
+    "price": 1000,
+    "price_label": "1000ကျပ်",
+    "speed": 10240,
+    "timePeriod": 1440,
+    "noOfDevice": 1
+}
+```
 
-Proxy to uplink path map:
-
-| Proxy API | Uplink API |
-|---|---|
-| `POST /login` | `POST /oauth20/client/access_token?token=<RUIJIE_LOGIN_TOKEN>` |
-| login tenant sync | `GET /org/tenant/info?access_token=` |
-| `GET /network_group` | `GET /group/single/tree?access_token=` |
-| `GET /packages` | `GET /intl/usergroup/list/{groupId}` |
-| `POST /packages/create` | `POST /intlSamProfile/create/{tenant}/{tenant}/{groupId}` then `POST /intl/usergroup/group/{groupId}` |
-| `POST /packages/:groupId` | `POST /intlSamProfile/update/{tenant}/{tenant}/{groupId}` then `PUT /intl/usergroup/group/{groupId}` |
-| `DELETE /packages/:uuid` | `DELETE /intl/usergroup/group/{groupId}` then `DELETE /intlSamProfile/delete/{authProfileId}` |
-| `GET /vouchers/*` | `GET /intlSamVoucher/getList/{tenantName}/{groupId}` |
-| `GET /vouchers/status` | `GET /intlSamVoucher/getStatus/{tenantName}/{groupId}` |
-| `POST /vouchers/generate` | `POST /intlSamVoucher/create/{tenant}/{tenant}/{groupId}` |
-| `DELETE /vouchers/expired` | `DELETE /intlSamVoucher/v2/delete` |
-| `GET /clients` | `GET /open/v1/dev/user/current-user` |
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `price` | number | Raw price value |
+| `price_label` | string | Price with currency suffix |
+| `speed` | number | Download rate limit in Kbps |
+| `timePeriod` | number | Duration in minutes |
 
 ---
 
-## Canonical Request/Response Contracts
+### 3.3 Vouchers
 
-All endpoint samples below show the payload inside response `data`.
-Actual HTTP response is wrapped by the global envelope:
+Voucher listings are automatically **grouped by date** and sorted descending.
 
+| Endpoint | Method | Query Params | Status |
+| :--- | :--- | :--- | :--- |
+| `/vouchers/remain` | `GET` | `groupId`, `start`, `pageSize` | Unused (Status 1) |
+| `/vouchers/active` | `GET` | `groupId`, `start`, `pageSize` | In-Use (Status 2) |
+| `/vouchers/expired` | `GET` | `groupId`, `start`, `pageSize` | Expired (Status 3) |
+
+**Voucher List Response Shape (all three endpoints are consistent):**
 ```json
 {
-  "success": true,
-  "message": "OK",
-  "data": {"...": "payload shown below"},
-  "meta": {}
-}
-```
-
-## 1) Login
-
-`POST /login`
-
-### Request
-
-```json
-{
-  "appid": "opena305a89b2d79",
-  "secret": "63899898099e42c3b5bfef8d9325e008"
-}
-```
-
-### Response
-
-```json
-{
-  "appid": "opena305a89b2d79",
-  "secret": "63899898099e42c3b5bfef8d9325e008",
-  "authorization": "Bearer opena305a89b2d79::RFH8oE1I0n1p2n5of6d3k5p8n4U8oC3j",
-  "access_code": null
-}
-```
-
-## 1.1) VIP Login
-
-`POST /login/vip` (alias `POST /auth/core/vip-login`)
-
-### Request
-
-```json
-{
-  "username": "vip_user_1",
-  "password": "vip_password_1"
-}
-```
-
-### Response
-
-Same as login response. The proxy resolves VIP credentials to mapped `appid/secret` and returns:
-
-```json
-{
-  "appid": "opena305a89b2d79",
-  "secret": "63899898099e42c3b5bfef8d9325e008",
-  "authorization": "Bearer opena305a89b2d79::RFH8oE1I0n1p2n5of6d3k5p8n4U8oC3j",
-  "access_code": null
-}
-```
-
----
-
-## 2) Network Group List (leaf only)
-
-`GET /network_group`
-
-### Response
-
-```json
-[
-  { "name": "BridgeDemo3", "groupId": 8597889 },
-  { "name": "SMB_GeneralDemo2", "groupId": 8597888 }
-]
-```
-
----
-
-## 3) Packages List
-
-`GET /packages?groupId=8597889`
-
-### Response (proxy-through shape from upstream)
-
-```json
-{
-  "code": 0,
-  "msg": "OK.",
   "data": [
     {
-      "id": 504690,
-      "userGroupName": "5h",
-      "authProfileId": "07271539267689731897455769202751",
-      "name": "5h",
-      "groupId": 8597889,
-      "noOfDevice": 1
-    }
-  ],
-  "count": 1
-}
-```
-
----
-
-## 4) Create Package (2-step orchestration)
-
-`POST /packages/create`
-
-### Request
-
-```json
-{
-  "noOfDevice": 1,
-  "timePeriod": 0,
-  "quota": 0,
-  "uploadRateLimit": 10240,
-  "downloadRateLimit": 10240,
-  "durationCtrlType": 0,
-  "timePeriodTotal": 0,
-  "timePeriodDaily": 60,
-  "timePeriodDailyCustom": 60,
-  "limitedTimes": 0,
-  "userGroupName": "2h",
-  "price": "1000",
-  "bindMac": 1,
-  "kickOffType": 1,
-  "packageType": "COMMON",
-  "groupId": 8597889,
-  "name": "2h",
-  "isBindSsid": 0
-}
-```
-
-### Response (simplified)
-
-```json
-{
-  "id": 504694,
-  "noOfDevice": 1,
-  "timePeriod": 0,
-  "quota": 0,
-  "uploadRateLimit": 10240,
-  "downloadRateLimit": 10240,
-  "durationCtrlType": 0,
-  "timePeriodTotal": 0,
-  "limitedTimes": 0,
-  "price": "1000",
-  "bindMac": 1,
-  "kickOffType": 1,
-  "groupId": 8597889,
-  "name": "2h"
-}
-```
-
----
-
-## 5) Update Package (2-step orchestration)
-
-`POST /packages/:groupId`
-
-### Request
-
-Include at least:
-
-```json
-{
-  "id": 504690,
-  "groupId": 8597889,
-  "name": "5h",
-  "userGroupName": "5h",
-  "authProfileId": "07271539267689731897455769202751"
-}
-```
-
-### Response
-
-```json
-{
-  "code": 0,
-  "msg": "OK."
-}
-```
-
----
-
-## 6) Delete Package (2-step orchestration)
-
-`DELETE /packages/:uuid?groupId=8597889&packageId=504694&authProfileId=55395712657796200634438859765701`
-
-- `uuid`: auth profile id (same as `authProfileId` when available)
-
-### Response
-
-```json
-{
-  "code": 0,
-  "msg": "OK."
-}
-```
-
----
-
-## 7) Voucher Lists (grouped by date)
-
-All three voucher list endpoints return vouchers grouped by date.
-
-### 7.1) Active Vouchers (In Use)
-
-`GET /vouchers/active?groupId=8597889&start=0&pageSize=100`
-
-### 7.2) Remaining Vouchers (Unused)
-
-`GET /vouchers/remain?groupId=8597889&start=0&pageSize=100`
-
-### 7.3) Expired Vouchers
-
-`GET /vouchers/expired?groupId=8597889&start=0&pageSize=100`
-
-### Response (all three endpoints)
-
-```json
-[
-  {
-    "date": "03/11/2026",
-    "timeType": "createDate",
-    "vouchers": [
-      {
-        "voucherCode": "zy4xt23pp",
-        "timePeriod": 0,
-        "maxClients": 1,
-        "status": "1",
-        "packagePrice": 1000,
-        "bindMac": 1,
-        "packageName": "5h",
-        "userGroupId": "504690",
-        "disableStatus": 0,
-        "price": "1000ကျပ်",
-        "dl_speed": "10Mbps",
-        "ul_speed": "10Mbps",
-        "duration": "Unlimited",
-        "createTime": 1772886009000,
-        "humanCreateTime": "2026-03-11 18:00:09",
-        "expiryTime": null,
-        "humanExpiryTime": "",
-        "loginTime": null,
-        "humanLoginTime": ""
-      }
-    ]
-  },
-  {
-    "date": "03/12/2026",
-    "timeType": "expiryDate",
-    "vouchers": [
-      {
-        "voucherCode": "48dgcjbf",
-        "timePeriod": 240,
-        "maxClients": 1,
-        "status": "3",
-        "packagePrice": 1000,
-        "bindMac": 1,
-        "packageName": "1000mmk",
-        "userGroupId": "344613",
-        "disableStatus": 0,
-        "price": "1000ကျပ်",
-        "dl_speed": "8Mbps",
-        "ul_speed": "8Mbps",
-        "duration": "4 hours",
-        "createTime": 1772886009000,
-        "humanCreateTime": "2026-03-11 18:00:09",
-        "loginTime": 1772945948000,
-        "humanLoginTime": "2026-03-12 10:32:28",
-        "expiryTime": 1772960348000,
-        "humanExpiryTime": "2026-03-12 14:32:28"
-      }
-    ]
-  }
-]
-```
-
-**Grouping logic:**
-- **Active** (`/active`): Grouped by `loginTime` → `timeType: "loginDate"`
-- **Remain** (`/remain`): Grouped by `createTime` → `timeType: "createDate"`
-- **Expired** (`/expired`): Grouped by `expiryTime` → `timeType: "expiryDate"`
-
----
-
-## 8) Create Vouchers
-
-`POST /vouchers/generate`
-
-### Request
-
-```json
-{
-  "groupId": 8597889,
-  "userGroupId": 504690,
-  "profile": "35701109567871531697785108416329",
-  "count": 3
-}
-```
-
-### Response (simplified)
-
-```json
-{
-  "count": 3,
-  "list": [
-    {
-      "uuid": "6236ee6623554c8caccefeb7bdddd741",
-      "voucherCode": "wtia35r5v",
-      "status": "1",
-      "profileId": "35701109567871531697785108416329",
-      "expiryTime": "2125-03-05 08:23:22"
+      "date": "03/14/2026",
+      "time_type": "create_date",
+      "vouchers": [
+        {
+          "voucher_code": "782rc4ads",
+          "time_period": 1440,
+          "max_clients": 1,
+          "status": "1",
+          "package_price": 1000,
+          "price_label": "1000ကျပ်",
+          "bind_mac": 1,
+          "package_name": "1D @ 10MBPS",
+          "user_group_id": "511370",
+          "disable_status": 0,
+          "speed": "10Mbps",
+          "duration": "1 day",
+          "create_time": "3/14/2026 10:04 AM",
+          "expiry_time": "",
+          "login_time": ""
+        }
+      ]
     }
   ]
 }
 ```
 
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `date` | string | Group date key (MM/DD/YYYY) |
+| `time_type` | string | `create_date`, `login_date`, or `expiry_date` |
+| `speed` | string | Download speed (e.g., "10Mbps") |
+| `price_label` | string | Price with currency suffix |
+| `duration` | string | Human-readable (e.g., "1 day", "4 hours") |
+| `create_time` | string | Short date/time (e.g., "3/14/2026 10:04 AM") |
+| `expiry_time` | string | Short date/time or empty |
+| `login_time` | string | Short date/time or empty |
+
+**Other Voucher Actions:**
+- `GET /vouchers/status?groupId=...`: Returns `{ expired, total, used }`.
+- `GET /vouchers/performance?groupId=...`: Returns `{ lastDay: {count, price}, monthly: {count, price} }`.
+- `POST /vouchers/generate`: Create new vouchers. Payload requires `groupId`, `userGroupId`, `profile`, and `count`.
+- `DELETE /vouchers/expired?groupId=...`: Batch deletes all expired vouchers for the group.
+
 ---
 
-## 9) Voucher Status Summary
+### 3.4 Clients
+Monitor connected devices.
 
-`GET /vouchers/status?groupId=8597889`
+| Endpoint | Method | Query Params |
+| :--- | :--- | :--- |
+| `/clients` | `GET` | `group_id`, `page_index`, `page_size` |
 
-### Response
-
+**Client Data Shape:**
 ```json
 {
-  "expired": 0,
-  "total": 10,
-  "used": 0
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "staModel": "Redmi Note 11",
+  "ip": "172.0.100.33",
+  "duration": "02:15"
 }
 ```
 
 ---
 
-## 10) Voucher Performance Metrics
+## 4. Specific Error Handling: Usergroup Not Synced
 
-`GET /vouchers/performance?groupId=8597889`
+If the upstream API returns code `1014`, the proxy maps this to a **409 Conflict**.
 
-Returns business performance metrics for vouchers (last day and monthly).
-
-### Response
-
-```json
-{
-  "lastDay": {
-    "count": 12,
-    "price": 12000
-  },
-  "monthly": {
-    "count": 45,
-    "price": 45000
-  }
-}
-```
+**Client Logic required:**
+- If `error.code === "USERGROUP_NOT_SYNCED"`:
+  1. Notify the user that the group selection is invalid.
+  2. Clear the local state for `selectedGroupId` and `selectedPackage`.
+  3. Force a refresh of the `/network_group` list.
 
 ---
 
-## 11) Delete Expired Vouchers (auto-fetch)
+## 5. AI Agent Handoff (Deterministic Flow)
 
-`DELETE /vouchers/expired?groupId=8597889`
+If you are an AI agent, follow this strict execution order to perform a business operation:
 
-### Request body
-
-**No request body required.** The server automatically:
-1. Fetches all expired vouchers (status=3) for the specified `groupId`
-2. Deletes them in batches
-3. Returns the deleted voucher details
-
-### Response
-
-```json
-{
-  "code": 0,
-  "msg": "Success.",
-  "deletedCount": 2,
-  "batchCount": 1,
-  "expiredVouchers": [
-    {
-      "voucherCode": "48dgcjbf",
-      "timePeriod": 240,
-      "maxClients": 1,
-      "status": "3",
-      "packagePrice": 1000,
-      "bindMac": 1,
-      "packageName": "1000mmk",
-      "userGroupId": "344613",
-      "disableStatus": 0,
-      "price": "1000ကျပ်",
-      "dl_speed": "8Mbps",
-      "ul_speed": "8Mbps",
-      "duration": "4 hours",
-      "uuid": "a08369e149994b2bb12f0b8911fb8bd4",
-      "expiryTime": 1772960348000,
-      "humanExpiryTime": "2026-03-12 14:32:28",
-      "loginTime": 1772945948000,
-      "humanLoginTime": "2026-03-12 10:32:28",
-      "createTime": 1772886009000,
-      "humanCreateTime": "2026-03-11 18:00:09"
-    }
-  ]
-}
-```
+1. **Auth**: `POST /login` -> Capture `data.authorization`.
+2. **Select Group**: `GET /network_group` -> User/Agent selects a `groupId`.
+3. **Select Package**: `GET /packages?groupId=...` -> Select `id` and `authProfileId`.
+4. **Generate**: `POST /vouchers/generate` using selected package IDs.
+5. **Display**: `GET /vouchers/remain?groupId=...` to show new vouchers.
 
 ---
 
-## 12) Clients List
+## 6. Admin Dashboard
 
-`GET /clients?group_id=8597722&page_index=1&page_size=100`
+The built-in admin panel allows managing VIP mappings and viewing active sessions.
 
-Returns authenticated clients only (simplified response).
-
-### Response
-
-```json
-{
-  "list": [
-    {
-      "mac": "FF:10:15:10:51:1A",
-      "staModel": "OPPO K11",
-      "ip": "192.168.4.241",
-      "duration": "02:14"
-    }
-  ]
-}
-```
-
-**Field descriptions:**
-- `mac`: Uppercase MAC address with colon separators (e.g., `FF:10:15:10:51:1A`)
-- `staModel`: Device model name
-- `ip`: Client IP address
-- `duration`: Connection duration in `HH:MM` format
+- **URL**: `http://localhost:3000/admin`
+- **Functionality**:
+  - Login with admin credentials (configured in `.env`).
+  - Add/Update VIP mappings (Mapping a simple username/password to a Ruijie AppID/Secret).
+  - List all active Firebase proxy sessions.
 
 ---
 
-## 13) Print Unused Vouchers
+## 7. Demo Mode
 
-`POST /clients/print`
+For testing without an upstream connection, use the `/demo` prefix.
 
-Fetches unused vouchers that haven't been printed yet by the client.
-
-### Request
-
-```json
-{
-  "groupId": 8597889,
-  "voucherCount": 5,
-  "voucherList": [
-    {
-      "uuid": "6236ee6623554c8caccefeb7bdddd741",
-      "voucherCode": "wtia35r5v"
-    },
-    {
-      "uuid": "a08369e149994b2bb12f0b8911fb8bd4",
-      "voucherCode": "48dgcjbf"
-    }
-  ]
-}
-```
-
-**Fields:**
-- `groupId` (required): Network group id
-- `voucherCount` (required): Number of unused vouchers to fetch
-- `voucherList` (optional): List of vouchers already printed by client
-
-### Response
-
-Returns up to `voucherCount` unused vouchers not present in the provided `voucherList`, grouped by date.
-
-```json
-[
-  {
-    "date": "03/13/2026",
-    "timeType": "createDate",
-    "vouchers": [
-      {
-        "voucherCode": "abc123xyz",
-        "status": "1",
-        "packagePrice": 1000,
-        "packageName": "2h",
-        "createTime": 1773000000000,
-        "humanCreateTime": "2026-03-13 10:00:00",
-        "...": "..."
-      }
-    ]
-  }
-]
-```
-
----
-
-## Error Handling
-
-### Client error handling checklist
-
-- Treat non-2xx as failure
-- Parse `message` for user-friendly toast/dialog
-- Log `error.details` for diagnostics only
-
-### Usergroup Not Synchronized (uplink code 1014)
-
-When uplink responds with `voucherData.code = 1014` (example message: `Group has not been synchronized`), treat it as a reset-required client state.
-
-Typical error envelope:
-
-```json
-{
-  "success": false,
-  "message": "Selected usergroup is not synchronized yet.",
-  "error": {
-    "httpStatus": 409,
-    "code": "USERGROUP_NOT_SYNCED",
-    "resetRequired": true,
-    "nextAction": "refresh_network_group_and_reselect",
-    "details": {
-      "code": 0,
-      "msg": "OK.",
-      "voucherData": {
-        "code": 1014,
-        "msg": "Group has not been synchronized"
-      }
-    }
-  }
-}
-```
-
-Client reset flow:
-
-1. Clear selected `groupId`.
-2. Clear selected package/usergroup state (`packageId`, `authProfileId`, related cached package rows).
-3. Reload groups via `GET /network_group`.
-4. Recheck candidate group with `GET /vouchers/status?groupId=...`.
-5. Proceed only when status call succeeds.
-
----
-
-## Demo Mode
-
-Use this section when frontend/client work should run without upstream connectivity.
-Demo endpoints are under `/demo` and still follow the same response envelope.
-
-### Demo base URL
-
-- `http://localhost:3000/demo`
-
-### Demo quick map
-
-- `POST /demo/login`
-- `GET /demo/network_group`
-- `GET /demo/packages?groupId=`
-- `POST /demo/packages/create`
-- `POST /demo/packages/:groupId`
-- `DELETE /demo/packages/:uuid?groupId=&packageId=&authProfileId=`
-- `GET /demo/vouchers/active?groupId=&start=&pageSize=`
-- `GET /demo/vouchers/remain?groupId=&start=&pageSize=`
-- `GET /demo/vouchers/expired?groupId=&start=&pageSize=`
-- `GET /demo/vouchers/status?groupId=`
-- `GET /demo/vouchers/performance?groupId=`
-- `POST /demo/vouchers/generate`
-- `DELETE /demo/vouchers/expired?groupId=`
-- `GET /demo/clients?group_id=&page_index=&page_size=`
-- `POST /demo/clients/print`
-
-### Demo flow
-
-1. `POST /demo/login`
-2. Read token from `response.data.authorization`
-3. `GET /demo/network_group` and choose `groupId`
-4. `GET /demo/packages?groupId=...`
-5. Optional: `POST /demo/vouchers/generate`
-6. Optional: `GET /demo/vouchers/active`, `/remain`, or `/expired`
-7. Optional: `GET /demo/vouchers/status` or `/performance`
-8. Optional: `DELETE /demo/vouchers/expired` (auto-fetch)
-9. Optional: `POST /demo/clients/print`
-10. `GET /demo/clients?group_id=...`
-
-### Demo implementation notes
-
-- Use the same envelope parsing rules as production routes.
-- Follow the demo flow steps above in your client implementation.
-- Demo data is in-memory and resets when the server restarts.
-- Client should not send `lang`; server uses default language internally.
-
----
-
-## Client normalizer behavior
-
-- On success, expect envelope: `success=true`, then read payload from `data`.
-- On failure, expect envelope: `success=false`, then read `message` and `error.details`.
-- All timestamps are in Unix epoch milliseconds.
-- Human-readable timestamps follow format: `YYYY-MM-DD HH:MM:SS`.
-- MAC addresses are uppercase with colon separators: `AA:BB:CC:DD:EE:FF`.
-- Durations are formatted as `HH:MM`.
+- **Base URL**: `http://localhost:3000/demo`
+- **Behavior**: Mimics all endpoints listed above using local state. No authentication headers are required for demo routes.
+- **Endpoints**: `/demo/login`, `/demo/network_group`, `/demo/vouchers/remain`, etc.

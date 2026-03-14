@@ -1,41 +1,45 @@
-const crypto = require('crypto');
-const config = require('../config');
-const { getFirestore } = require('../firebase/firebase');
+const crypto = require("crypto");
+const config = require("../config");
+const { getFirestore } = require("../firebase/firebase");
+const { InternalServerError } = require("../helpers/AppError");
+const logger = require("../helpers/logger");
 
 function getCollection() {
   const db = getFirestore();
 
   if (!db) {
-    throw new Error('Firestore is not initialized. Configure Firebase to use admin login.');
+    throw new InternalServerError(
+      "Firestore is not initialized. Configure Firebase to use admin login.",
+    );
   }
 
   return db.collection(config.adminAuth.collection);
 }
 
 function hashPassword(password, saltHex) {
-  const salt = saltHex ? Buffer.from(saltHex, 'hex') : crypto.randomBytes(16);
+  const salt = saltHex ? Buffer.from(saltHex, "hex") : crypto.randomBytes(16);
   const derived = crypto.scryptSync(String(password), salt, 64);
 
-  return `scrypt$${salt.toString('hex')}$${derived.toString('hex')}`;
+  return `scrypt$${salt.toString("hex")}$${derived.toString("hex")}`;
 }
 
 function verifyPassword(password, storedHash) {
-  if (!storedHash || typeof storedHash !== 'string') {
+  if (!storedHash || typeof storedHash !== "string") {
     return false;
   }
 
-  const parts = storedHash.split('$');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') {
+  const parts = storedHash.split("$");
+  if (parts.length !== 3 || parts[0] !== "scrypt") {
     return false;
   }
 
   const saltHex = parts[1];
   const expectedHex = parts[2];
   const actualHash = hashPassword(password, saltHex);
-  const actualHex = actualHash.split('$')[2];
+  const actualHex = actualHash.split("$")[2];
 
-  const expected = Buffer.from(expectedHex, 'hex');
-  const actual = Buffer.from(actualHex, 'hex');
+  const expected = Buffer.from(expectedHex, "hex");
+  const actual = Buffer.from(actualHex, "hex");
 
   if (expected.length !== actual.length) {
     return false;
@@ -45,8 +49,8 @@ function verifyPassword(password, storedHash) {
 }
 
 async function ensureDefaultAdminCredentials() {
-  const username = String(config.adminAuth.defaultUsername || '').trim();
-  const password = String(config.adminAuth.defaultPassword || '');
+  const username = String(config.adminAuth.defaultUsername || "").trim();
+  const password = String(config.adminAuth.defaultPassword || "");
 
   if (!username || !password) {
     return;
@@ -64,20 +68,20 @@ async function ensureDefaultAdminCredentials() {
   await docRef.set({
     username,
     passwordHash: hashPassword(password),
-    role: 'super_admin',
+    role: "super_admin",
     createdAt: nowIso,
-    updatedAt: nowIso
+    updatedAt: nowIso,
   });
 
-  console.log('[AdminAuth] Seeded default admin credentials in Firestore', {
+  logger.info("[AdminAuth] Seeded default admin credentials in Firestore", {
     username,
-    collection: config.adminAuth.collection
+    collection: config.adminAuth.collection,
   });
 }
 
 async function verifyAdminCredential(username, password) {
-  const normalizedUsername = String(username || '').trim();
-  const normalizedPassword = String(password || '');
+  const normalizedUsername = String(username || "").trim();
+  const normalizedPassword = String(password || "");
 
   if (!normalizedUsername || !normalizedPassword) {
     return null;
@@ -99,11 +103,11 @@ async function verifyAdminCredential(username, password) {
 
   return {
     username: data.username || normalizedUsername,
-    role: data.role || 'admin'
+    role: data.role || "admin",
   };
 }
 
 module.exports = {
   ensureDefaultAdminCredentials,
-  verifyAdminCredential
+  verifyAdminCredential,
 };

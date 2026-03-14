@@ -1,70 +1,87 @@
-function parseCompositeBearerToken(token) {
-  if (!token || !token.includes('::')) {
-    return null;
-  }
+const { AuthenticationError } = require("./AppError");
 
-  const parts = token.split('::');
+/**
+ * Parses a composite bearer token in the format appid::token.
+ * @param {string} token - The raw token string.
+ * @returns {{ appid: string, accessToken: string }} Object containing appid and accessToken.
+ * @throws {AuthenticationError} If the token format is invalid.
+ */
+function parseCompositeBearerToken(token) {
+  const source = String(token || "").trim();
+  const parts = source.split("::");
 
   if (parts.length !== 2) {
-    const error = new Error('Invalid bearer token format. Expected appid::token.');
-    error.statusCode = 401;
-    throw error;
+    throw new AuthenticationError(
+      "Invalid bearer token format. Expected appid::token.",
+    );
   }
 
   const appid = parts[0].trim();
   const accessToken = parts[1].trim();
 
   if (!appid || !accessToken) {
-    const error = new Error('Invalid bearer token format. Expected appid::token.');
-    error.statusCode = 401;
-    throw error;
+    throw new AuthenticationError(
+      "Invalid bearer token format. Expected appid::token.",
+    );
   }
 
   return { appid, accessToken };
 }
 
-function extractAccessToken(token) {
-  if (!token) {
-    return '';
+/**
+ * Extracts a bearer token from the Authorization header and parses it.
+ * @param {string} authHeader - The Authorization header value.
+ * @returns {{ appid: string, accessToken: string }|null} The parsed composite token or null if not present.
+ */
+function extractAccessToken(authHeader) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
   }
 
-  const parts = String(token).split('::');
-
-  if (parts.length === 2) {
-    return parts[1].trim();
-  }
-
-  return String(token).trim();
+  const token = authHeader.slice(7).trim();
+  return parseCompositeBearerToken(token);
 }
 
-async function resolveAuthenticatedSession(token, sessionRepository) {
+/**
+ * Resolves and validates an authenticated session from a token.
+ * @param {string} token - The raw composite token.
+ * @param {object} repository - The session repository instance.
+ * @returns {Promise<{ session: object, accessToken: string }>} Object containing the session and accessToken.
+ * @throws {AuthenticationError} If the session is invalid or not found.
+ */
+async function resolveAuthenticatedSession(token, repository) {
+  if (!token) {
+    throw new AuthenticationError(
+      "Composite bearer token is required. Use Bearer appid::token.",
+    );
+  }
+
   const composite = parseCompositeBearerToken(token);
 
-  if (!composite) {
-    const error = new Error('Composite bearer token is required. Use Bearer appid::token.');
-    error.statusCode = 401;
-    throw error;
-  }
-
-  const session = await sessionRepository.getByAppId(composite.appid);
+  const session = await repository.getByAppId(composite.appid);
 
   if (!session) {
-    const error = new Error('Session not found for provided appid. Please login again.');
-    error.statusCode = 401;
-    throw error;
+    throw new AuthenticationError(
+      "Session not found for provided appid. Please login again.",
+    );
   }
 
-  if (session.access_token !== composite.accessToken) {
-    const error = new Error('Bearer token is invalid or expired. Please login again.');
-    error.statusCode = 401;
-    throw error;
+  const storedAccessToken = session.access_token || session.accessToken;
+
+  if (storedAccessToken !== composite.accessToken) {
+    throw new AuthenticationError(
+      "Bearer token is invalid or expired. Please login again.",
+    );
   }
 
-  return { session, accessToken: composite.accessToken, appid: composite.appid };
+  return {
+    session,
+    accessToken: composite.accessToken,
+  };
 }
 
 module.exports = {
   parseCompositeBearerToken,
   extractAccessToken,
-  resolveAuthenticatedSession
+  resolveAuthenticatedSession,
 };

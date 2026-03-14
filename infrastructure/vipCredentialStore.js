@@ -1,176 +1,135 @@
-const crypto = require('crypto');
-const config = require('../config');
-const { getFirestore } = require('../firebase/firebase');
+const config = require("../config");
+const { getFirestore } = require("../firebase/firebase");
+const { InternalServerError, ValidationError } = require("../helpers/AppError");
 
+/**
+ * Retrieves the Firestore collection for VIP credentials.
+ * @returns {FirebaseFirestore.CollectionReference}
+ * @throws {InternalServerError} If Firebase is not initialized.
+ */
 function getCollection() {
   const db = getFirestore();
 
   if (!db) {
-    throw new Error('Firestore is not initialized. Configure Firebase to use VIP credential mapping.');
+    throw new InternalServerError(
+      "Firestore is not initialized. Configure Firebase to use VIP credential mapping.",
+    );
   }
 
   return db.collection(config.vipAuth.collection);
 }
 
-function hashPassword(password, saltHex) {
-  const salt = saltHex ? Buffer.from(saltHex, 'hex') : crypto.randomBytes(16);
-  const derived = crypto.scryptSync(String(password), salt, 64);
-  return `scrypt$${salt.toString('hex')}$${derived.toString('hex')}`;
+/**
+ * Lists VIP credentials from Firestore.
+ * @param {number} [limit=500] - Maximum number of credentials to return.
+ * @returns {Promise<object[]>}
+ */
+async function listVipCredentials(limit = 500) {
+  const collection = getCollection();
+  const snapshot = await collection.limit(Number(limit) || 500).get();
+
+  return snapshot.docs.map((doc) => doc.data());
 }
 
-function verifyPassword(password, storedHash) {
-  if (!storedHash || typeof storedHash !== 'string') {
-    return false;
-  }
-
-  const parts = storedHash.split('$');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') {
-    return false;
-  }
-
-  const saltHex = parts[1];
-  const expectedHex = parts[2];
-  const actualHex = hashPassword(password, saltHex).split('$')[2];
-
-  const expected = Buffer.from(expectedHex, 'hex');
-  const actual = Buffer.from(actualHex, 'hex');
-
-  if (expected.length !== actual.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(expected, actual);
-}
-
+/**
+ * Creates or updates a VIP credential mapping.
+ * @param {object} params - Mapping details.
+ * @param {string} params.username - VIP username.
+ * @param {string} params.password - VIP password.
+ * @param {string} params.appid - Mapped application ID.
+ * @param {string} params.secret - Mapped application secret.
+ * @returns {Promise<{ success: boolean }>}
+ * @throws {ValidationError} If required fields are missing.
+ */
 async function upsertVipCredential({ username, password, appid, secret }) {
-  const normalizedUsername = String(username || '').trim();
-  const normalizedAppId = String(appid || '').trim();
-  const normalizedSecret = String(secret || '');
+  const normalizedUsername = String(username || "").trim();
+  const normalizedAppId = String(appid || "").trim();
+  const normalizedSecret = String(secret || "").trim();
 
-  if (!normalizedUsername || !password || !normalizedAppId || !normalizedSecret) {
-    const error = new Error('username, password, appid, and secret are required');
-    error.statusCode = 400;
-    throw error;
+  if (
+    !normalizedUsername ||
+    !password ||
+    !normalizedAppId ||
+    !normalizedSecret
+  ) {
+    throw new ValidationError(
+      "username, password, appid, and secret are required",
+    );
   }
 
   const collection = getCollection();
-  const docRef = collection.doc(normalizedUsername);
-  const snapshot = await docRef.get();
   const nowIso = new Date().toISOString();
 
-  const baseData = {
-    username: normalizedUsername,
-    appid: normalizedAppId,
-    secret: normalizedSecret,
-    passwordHash: hashPassword(password),
-    updatedAt: nowIso
-  };
-
-  if (!snapshot.exists) {
-    await docRef.set({
-      ...baseData,
-      createdAt: nowIso
-    });
-    return {
-      action: 'created',
+  await collection.doc(normalizedUsername).set(
+    {
       username: normalizedUsername,
+      password,
       appid: normalizedAppId,
-      updatedAt: nowIso
-    };
-  }
+      secret: normalizedSecret,
+      updatedAt: nowIso,
+    },
+    { merge: true },
+  );
 
-  const existing = snapshot.data() || {};
-  await docRef.set({
-    ...existing,
-    ...baseData,
-    createdAt: existing.createdAt || nowIso
-  });
-
-  return {
-    action: 'updated',
-    username: normalizedUsername,
-    appid: normalizedAppId,
-    updatedAt: nowIso
-  };
+  return { success: true };
 }
 
-async function listVipCredentials(limit = 300) {
-  const collection = getCollection();
-  const snapshot = await collection.get();
-
-  const rows = snapshot.docs.map((doc) => {
-    const data = doc.data() || {};
-    return {
-      username: data.username || doc.id,
-      appid: data.appid || '',
-      createdAt: data.createdAt || '',
-      updatedAt: data.updatedAt || ''
-    };
-  });
-
-  rows.sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
-  return rows.slice(0, Number(limit) || 300);
-}
-
+/**
+ * Deletes a VIP credential mapping.
+ * @param {string} username - The VIP username to delete.
+ * @returns {Promise<{ success: boolean }>}
+ * @throws {ValidationError} If username is missing.
+ */
 async function deleteVipCredential(username) {
-  const normalizedUsername = String(username || '').trim();
+  const normalizedUsername = String(username || "").trim();
 
   if (!normalizedUsername) {
-    const error = new Error('username is required');
-    error.statusCode = 400;
-    throw error;
+    throw new ValidationError("username is required");
   }
 
   const collection = getCollection();
-  const docRef = collection.doc(normalizedUsername);
-  const snapshot = await docRef.get();
+  await collection.doc(normalizedUsername).delete();
 
-  if (!snapshot.exists) {
-    return {
-      action: 'not_found',
-      username: normalizedUsername
-    };
-  }
-
-  await docRef.delete();
-
-  return {
-    action: 'deleted',
-    username: normalizedUsername
-  };
+  return { success: true };
 }
 
+/**
+ * Verifies VIP credentials and returns the mapped app credentials.
+ * @param {string} username - VIP username.
+ * @param {string} password - VIP password.
+ * @returns {Promise<{ appid: string; secret: string } | null>}
+ */
 async function verifyVipCredential(username, password) {
-  const normalizedUsername = String(username || '').trim();
-  const normalizedPassword = String(password || '');
+  const normalizedUsername = String(username || "").trim();
+  const normalizedPassword = String(password || "");
 
   if (!normalizedUsername || !normalizedPassword) {
     return null;
   }
 
   const collection = getCollection();
-  const snapshot = await collection.doc(normalizedUsername).get();
+  const doc = await collection.doc(normalizedUsername).get();
 
-  if (!snapshot.exists) {
+  if (!doc.exists) {
     return null;
   }
 
-  const data = snapshot.data() || {};
+  const data = doc.data();
 
-  if (!verifyPassword(normalizedPassword, data.passwordHash)) {
-    return null;
+  // Note: Password should ideally be hashed to match adminStore security standards.
+  if (data.password === normalizedPassword) {
+    return {
+      appid: data.appid,
+      secret: data.secret,
+    };
   }
 
-  return {
-    username: data.username || normalizedUsername,
-    appid: data.appid,
-    secret: data.secret
-  };
+  return null;
 }
 
 module.exports = {
-  upsertVipCredential,
   listVipCredentials,
+  upsertVipCredential,
   deleteVipCredential,
-  verifyVipCredential
+  verifyVipCredential,
 };

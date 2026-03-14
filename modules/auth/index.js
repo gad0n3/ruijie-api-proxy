@@ -8,10 +8,19 @@ const {
 const { createAuthUseCases } = require("./useCases/authUseCases");
 const { createAuthController } = require("./controllers/authController");
 
-function createAuthModule() {
-  const authGateway = createAuthGateway();
-  const authSessionRepository = createAuthSessionRepository();
-  const vipCredentialRepository = createVipCredentialRepository();
+/**
+ * Creates the authentication module, wiring up its dependencies.
+ * @param {object} dependencies - The dependencies for the auth module.
+ * @param {object} dependencies.authGateway - The authentication gateway.
+ * @param {object} dependencies.authSessionRepository - The session repository for auth.
+ * @param {object} dependencies.vipCredentialRepository - The VIP credential repository.
+ * @returns {object} The auth module with its use cases and controller.
+ */
+function createAuthModule({
+  authGateway,
+  authSessionRepository,
+  vipCredentialRepository,
+}) {
   const authUseCases = createAuthUseCases({
     authGateway,
     sessionRepository: authSessionRepository,

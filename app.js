@@ -3,11 +3,14 @@ const express = require("express");
 const cors = require("cors");
 const swaggerUi = require("swagger-ui-express");
 const YAML = require("yamljs");
-const asyncHandler = require("./middleware/asyncHandler");
+
 const {
+  asyncHandler,
   responseEnvelopeMiddleware,
-  isBypassedPath,
-} = require("./middleware/responseEnvelope");
+  requestLogger,
+  errorHandler,
+} = require("./middleware");
+
 const createAuthRoutes = require("./routes/authRoutes");
 const createVoucherRoutes = require("./routes/voucherRoutes");
 const createPackageRoutes = require("./routes/packageRoutes");
@@ -15,15 +18,17 @@ const createClientRoutes = require("./routes/clientRoutes");
 const createNetworkGroupRoutes = require("./routes/networkGroupRoutes");
 const createDemoRoutes = require("./routes/demoRoutes");
 const createAdminRoutes = require("./routes/adminRoutes");
+
 const {
   ensureDefaultAdminCredentials,
 } = require("./infrastructure/adminStore");
 const { createAppDependencies } = require("./modules/compositionRoot");
 const { initializeFirebase } = require("./firebase/firebase");
+const logger = require("./helpers/logger");
 
 initializeFirebase();
 ensureDefaultAdminCredentials().catch((error) => {
-  console.error("[AdminAuth] Failed to ensure default admin credentials", {
+  logger.error("[AdminAuth] Failed to ensure default admin credentials", {
     message: error.message,
   });
 });
@@ -51,26 +56,7 @@ const networkGroupRoutes = createNetworkGroupRoutes({ networkGroupController });
 app.use(cors());
 app.use(express.json());
 app.use(responseEnvelopeMiddleware);
-
-app.use((req, res, next) => {
-  console.log("[Request]", {
-    method: req.method,
-    path: req.originalUrl,
-    headers: req.headers,
-    query: req.query,
-    body: req.body,
-  });
-
-  res.on("finish", () => {
-    console.log("[Response]", {
-      method: req.method,
-      path: req.originalUrl,
-      status: res.statusCode,
-    });
-  });
-
-  next();
-});
+app.use(requestLogger);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
@@ -99,45 +85,6 @@ app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
 
-app.use((error, req, res, next) => {
-  let statusCode = error.statusCode || 500;
-  const details = error.details || null;
-
-  const isUsergroupNotSynced = Number(details?.voucherData?.code) === 1014;
-  const message = isUsergroupNotSynced
-    ? "Selected usergroup is not synchronized yet."
-    : error.message || "Internal server error";
-
-  if (isUsergroupNotSynced) {
-    statusCode = 409;
-  }
-
-  if (isBypassedPath(req.originalUrl, req.path)) {
-    const payload = {
-      message,
-    };
-
-    if (details) {
-      payload.details = details;
-    }
-
-    res.status(statusCode).json(payload);
-    return;
-  }
-
-  res.status(statusCode).json({
-    success: false,
-    message,
-    error: {
-      httpStatus: statusCode,
-      code: isUsergroupNotSynced ? "USERGROUP_NOT_SYNCED" : undefined,
-      resetRequired: isUsergroupNotSynced || undefined,
-      nextAction: isUsergroupNotSynced
-        ? "refresh_network_group_and_reselect"
-        : undefined,
-      details,
-    },
-  });
-});
+app.use(errorHandler);
 
 module.exports = app;

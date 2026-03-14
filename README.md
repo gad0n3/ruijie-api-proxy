@@ -1,345 +1,127 @@
-# ruijie-api-proxy
+# Ruijie API Proxy
 
-Node.js + Express API proxy project using CommonJS modules. This project mirrors a modular ruijie-proxy style architecture and forwards requests to an upstream API.
+A robust Node.js + Express API proxy designed to interface seamlessly with Ruijie Cloud upstream services. This project implements a **Clean Architecture** to ensure high stability, consistent data formatting, and ease of maintenance.
 
-## Project structure
+## Project Structure
 
-- `routes/` - Express route modules grouped by domain
-- `modules/` - Clean architecture modules (incremental migration)
-- `modules/compositionRoot.js` - central dependency wiring for controllers
-- `infrastructure/` - Infrastructure adapters (Firebase session store)
-- `docs/` - OpenAPI/Swagger definition
-- `scripts/` - Utility shell scripts
-- `helpers/` - Shared helper modules (upstream HTTP client)
-- `middleware/` - Middleware modules (bearer auth, async handling)
-- `firebase/` - Firebase Admin initialization setup
+- `routes/` - Express route definitions organized by domain.
+- `modules/` - Business logic partitioned into clean modules (Auth, Voucher, Package, Client, NetworkGroup).
+  - `controllers/` - HTTP request handlers.
+  - `useCases/` - Core business logic and validation.
+  - `gateways/` - Upstream API integration.
+  - `repositories/` - Persistence adapters (Firebase).
+- `compositionRoot.js` - Centralized dependency injection wiring.
+- `infrastructure/` - Shared persistence logic and external service adapters.
+- `middleware/` - Standardized Express middleware (Auth, Error Handling, Logging).
+- `helpers/` - Reusable utilities for data formatting, token parsing, and general logic.
+- `docs/` - OpenAPI/Swagger specifications and detailed integration guides.
+- `firebase/` - Firebase Admin initialization and configuration.
 
-## Clean architecture status
+## Architectural Principles
 
-The project now uses clean architecture across all domains.
-
-- Migrated modules:
-  - `modules/auth/`
-  - `modules/voucher/`
-  - `modules/package/`
-  - `modules/client/`
-- Each module follows:
-  - `controllers/` - HTTP handlers
-  - `useCases/` - business logic
-  - `gateways/` - upstream integrations
-  - `repositories/` - persistence adapters (when needed)
-- Client routes include `auth`, `unauth`, and `suspected` filters.
-- Domain logic is implemented in `modules/`; infrastructure concerns are in `infrastructure/`.
+Following a comprehensive refactoring, the project adheres to several key design patterns:
+- **Dependency Injection**: Modules receive their dependencies (gateways, repositories) via constructors, enabling high testability.
+- **Consistent Error Handling**: Semantic custom error classes and a global error middleware ensure predictable failure responses.
+- **Standardized Input Validation**: Schema-based validation for all incoming requests.
+- **Centralized Configuration**: Environment variables are validated and managed through a single source of truth (`config.js`).
+- **Structured Logging**: Unified logging abstraction for improved observability.
 
 ## Prerequisites
 
-- Node.js 18+
-- npm
+- Node.js 20+ (Optimized for modern LTS)
+- npm or yarn
+- Firebase Project (for session and credential storage)
 
 ## Setup
 
-1. Install dependencies:
-   - `npm install`
-2. Copy environment file:
-   - `cp .env.example .env`
-3. Update `.env` values, especially:
-   - `UPSTREAM_BASE_URL`
-  - `RUIJIE_LOGIN_TOKEN` (default is fixed to `d63dss0a81e4415a889ac5b78fsc904a`)
-   - Firebase credentials (`FIREBASE_SERVICE_ACCOUNT_PATH` or inline env values)
-  - `FIREBASE_SESSION_COLLECTION` (defaults to `start`)
-4. Start server:
-   - `npm run dev`
+1. **Install dependencies**:
+   ```bash
+   npm install
+   ```
 
-## Available scripts
+2. **Configure Environment**:
+   Copy `.env.example` to `.env` and fill in the required values:
+   - `UPSTREAM_BASE_URL`: The target Ruijie Cloud API URL.
+   - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`: Firebase service account details.
+   - `ADMIN_USERNAME`, `ADMIN_PASSWORD`: Credentials for the proxy admin dashboard.
 
-- `npm start` - run production mode
-- `npm run dev` - run with nodemon
-- `bash scripts/dev.sh` - install and run dev server
-- `bash scripts/smoke.sh` - lightweight smoke check
-- `bash scripts/e2e.sh` - login + package CRUD + voucher create/list/delete test flow
-- `bash scripts/e2e-negative.sh` - intentionally wrong/negative test flow for proxy and uplink errors
+3. **Start the server**:
+   ```bash
+   # Development mode with nodemon
+   npm run dev
 
-### E2E test script
+   # Production mode
+   npm start
+   ```
 
-```bash
-APPID="YOUR_APP_ID" SECRET="YOUR_APP_SECRET" bash scripts/e2e.sh
-```
+## Available Scripts
 
-Optional envs:
-- `BASE_URL` (default `http://localhost:3000`)
-- `GROUP_ID` (if omitted, script auto-picks first synchronized group)
-- `PACKAGE_NAME` (default `2h-e2e`)
-- `PACKAGE_PRICE` (default `1000`)
-- `VOUCHER_COUNT` (default `3`)
-- `VOUCHER_STATUS` (default `3`, expire)
+- `npm start`: Runs the server in production mode.
+- `npm run dev`: Runs the server in development mode with auto-reload.
+- `npm test`: Executes the Jest test suite.
+- `bash scripts/smoke.sh`: Performs a lightweight health check.
+- `bash scripts/e2e.sh`: Runs end-to-end integration tests.
 
-### Negative E2E script
+## API Response Envelope
 
-Runs intentionally invalid requests to surface error handling from both proxy and uplink.
+All API routes return a normalized JSON envelope:
 
-```bash
-bash scripts/e2e-negative.sh
-```
-
-With real credentials (recommended for token-related failure checks):
-
-```bash
-APPID="YOUR_APP_ID" SECRET="YOUR_APP_SECRET" bash scripts/e2e-negative.sh
-```
-
-## API endpoints
-
-### Auth/Core
-- `POST /login` (alias)
-- `POST /login/vip` (alias)
-- `POST /auth/core/login`
-- `POST /auth/core/vip-login`
-- `GET /auth/core/projects`
-- `GET /auth/core/tenant`
-
-### Vouchers
-- `GET /vouchers`
-- `GET /vouchers/status`
-- `POST /vouchers/generate`
-
-### Packages
-- `GET /packages`
-- `POST /packages/create`
-- `POST /packages/:groupId`
-- `DELETE /packages/:uuid`
-
-### Clients
-- `GET /clients/auth`
-- `GET /clients/unauth`
-- `GET /clients/suspected`
-
-## Swagger docs
-
-After starting the server, open:
-
-- `http://localhost:3000/docs`
-
-Additional client integration doc:
-
-- `docs/client-docs.md` (Client API + AI-friendly integration contracts)
-- `docs/client-docs.ai.md` (AI-first deterministic contract copy)
-
-## Admin dashboard
-
-Small web dashboard for viewing login sessions and managing VIP login mapping.
-
-- URL: `http://localhost:3000/admin`
-- Data API: `GET /admin/api/logins`
-- Login API: `POST /admin/login` with `{ "username", "password" }`
-- Admin credentials are seeded into Firebase collection `admin_users` (configurable via `FIREBASE_ADMIN_COLLECTION`).
-- VIP credentials API (requires admin login):
-  - `GET /admin/api/vip-credentials`
-  - `POST /admin/api/vip-credentials` with `{ "username", "password", "appid", "secret" }`
-  - `DELETE /admin/api/vip-credentials/:username`
-- VIP credentials are stored in Firebase collection `vip_credentials` (configurable via `FIREBASE_VIP_CREDENTIAL_COLLECTION`).
-
-Default admin seed values (change in `.env` before production):
-
-- `ADMIN_USERNAME=admin`
-- `ADMIN_PASSWORD=admin12345`
-- `ADMIN_SESSION_SECRET=change-this-admin-session-secret`
-
-## Example curl commands
-
-### 1) Login
-
-```bash
-curl -X POST http://localhost:3000/login \
-  -H "Content-Type: application/json" \
-  -d '{"appid":"YOUR_APP_ID","secret":"YOUR_APP_SECRET"}'
-```
-
-The login response includes:
-- envelope fields: `success`, `message`, `data`, `meta`
-- login payload in `data`:
-  - `appid`
-  - `secret`
-  - `authorization` (format: `Bearer appid::token`)
-  - `access_code` (`null`)
-
-Use `data.authorization` directly for protected routes.
-
-### 1.1) VIP Login
-
-```bash
-curl -X POST http://localhost:3000/login/vip \
-  -H "Content-Type: application/json" \
-  -d '{"username":"vip_user_1","password":"vip_password_1"}'
-```
-
-VIP login returns the same login payload and authorization format as normal `/login`.
-
-## Response envelope
-
-All API routes (except `/docs`) return a normalized envelope.
-
-Success:
-
+### Success
 ```json
 {
   "success": true,
   "message": "OK",
-  "data": {},
-  "meta": {}
+  "data": { ... },
+  "meta": { "count": 10 }
 }
 ```
 
-Error:
-
+### Error
 ```json
 {
   "success": false,
-  "message": "...",
+  "message": "Descriptive error message",
   "error": {
-    "httpStatus": 401,
-    "details": {}
+    "httpStatus": 400,
+    "name": "ValidationError",
+    "details": { ... }
   }
 }
 ```
 
-Special mapped error:
+## Authentication
 
-- If uplink returns `voucherData.code=1014` (`Group has not been synchronized`), proxy maps it to:
-  - HTTP `409`
-  - `error.code = USERGROUP_NOT_SYNCED`
-  - `error.resetRequired = true`
-  - `error.nextAction = refresh_network_group_and_reselect`
+1.  Call `POST /login` with `appid` and `secret`.
+2.  Extract the `authorization` string from `response.data.authorization`.
+3.  Include this token in the `Authorization` header for all subsequent requests:
+    `Authorization: Bearer <appid>::<access_token>`
 
-## Detailed login flow
+## Core Endpoints
 
-1. Client calls `POST /login` (or `POST /auth/core/login`) with `appid` and `secret`.
-  - Alternative for end-user app auth: `POST /login/vip` (or `/auth/core/vip-login`) with VIP `username` and `password` mapped by admin.
-2. Proxy calls upstream:
-   - `POST /oauth20/client/access_token?token=<RUIJIE_LOGIN_TOKEN>`
-3. Proxy extracts `access_token` from upstream response.
-4. Proxy calls upstream tenant info:
-  - `GET /org/tenant/info?access_token=<access_token>`
-5. Proxy stores session to Firebase as:
-   - Collection: `start` (or `FIREBASE_SESSION_COLLECTION`)
-   - Document ID: `appid`
-   - Document body:
-     ```json
-     {
-       "access_token": "<token>",
-       "appid": "<appid>",
-     "secret": "<secret>",
-     "tenantName": "<tenantName>",
-     "tenantId": <tenantId>
-     }
-     ```
-6. Proxy returns to client:
-   ```json
-   {
-     "success": true,
-     "message": "OK",
-     "data": {
-       "appid": "<appid>",
-       "secret": "<secret>",
-       "authorization": "Bearer <appid>::<access_token>",
-       "access_code": null
-     },
-     "meta": {}
-   }
-   ```
+### Authentication
+- `POST /login`: Standard application login.
+- `POST /login/vip`: Login via VIP credential mapping.
+- `GET /auth/core/projects`: List projects associated with the session.
 
-### 2) Get projects
+### Network Discovery
+- `GET /network_group`: List leaf network groups.
 
-```bash
-curl http://localhost:3000/auth/core/projects \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
+### Packages & Vouchers
+- `GET /packages`: List user groups (packages) for a specific group.
+- `POST /vouchers/generate`: Generate new voucher codes.
+- `GET /vouchers/active|remain|expired`: Grouped voucher listings.
+- `DELETE /vouchers/expired`: Batch delete expired vouchers.
 
-### 3) Get tenant
+### Client Monitoring
+- `GET /clients`: List authenticated devices currently connected to a group.
 
-```bash
-curl http://localhost:3000/auth/core/tenant \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
+## Documentation
 
-### 4) Get vouchers
+For detailed integration steps, data schemas, and AI agent flow guidance, please refer to:
+- **Client Integration Guide**: `docs/client-docs.md`
+- **OpenAPI/Swagger Spec**: `docs/openapi.yaml` (available at `http://localhost:3000/docs` when running).
 
-```bash
-curl http://localhost:3000/vouchers \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
+## Admin Dashboard
 
-### 5) Generate vouchers
-
-```bash
-curl -X POST http://localhost:3000/vouchers/generate \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"count":10,"type":"daily"}'
-```
-
-### 5.1) Get voucher status summary
-
-```bash
-curl "http://localhost:3000/vouchers/status?groupId=GROUP_ID" \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
-
-### 6) Get packages
-
-```bash
-curl "http://localhost:3000/packages?groupId=GROUP_ID" \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
-
-### 7) Create package
-
-```bash
-curl -X POST http://localhost:3000/packages/create \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Starter Package","speed":"100Mbps"}'
-```
-
-### 8) Update package group
-
-```bash
-curl -X POST http://localhost:3000/packages/GROUP_ID \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Updated Group"}'
-```
-
-### 9) Delete package
-
-```bash
-curl -X DELETE http://localhost:3000/packages/PACKAGE_UUID \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
-
-### 10) Get authenticated clients
-
-```bash
-curl "http://localhost:3000/clients/auth?group_id=8597722&page_index=1&page_size=100" \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
-
-### 11) Get unauthenticated clients
-
-```bash
-curl "http://localhost:3000/clients/unauth?group_id=8597722&page_index=1&page_size=100" \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
-
-### 12) Get suspected clients
-
-```bash
-curl "http://localhost:3000/clients/suspected?group_id=8597722&page_index=1&page_size=100" \
-  -H "Authorization: Bearer APPID::ACCESS_TOKEN"
-```
-
-## Notes
-
-- This proxy forwards payloads/query parameters to upstream endpoints.
-- Ensure upstream endpoint paths match your target Ruijie service routes.
-- Login sessions are stored in Firebase collection `start` (or your configured collection) with document id = `appid`.
-- Stored session fields include: `access_token`, `appid`, `secret`, `tenantName`, `tenantId`.
+Manage VIP credential mappings and monitor active proxy sessions:
+- **URL**: `http://localhost:3000/admin`

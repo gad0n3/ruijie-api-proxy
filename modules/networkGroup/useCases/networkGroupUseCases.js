@@ -2,6 +2,7 @@ const {
   extractAccessToken,
   resolveAuthenticatedSession,
 } = require("../../../helpers/tokenParser");
+const { UpstreamError } = require("../../../helpers/AppError");
 
 function collectLeafGroups(node) {
   if (!node || typeof node !== "object") {
@@ -28,12 +29,11 @@ function collectLeafGroups(node) {
 
 function validateGroupTreeResponse(response) {
   if (Number(response?.code) !== 0) {
-    const error = new Error(
+    throw new UpstreamError(
       response?.msg || "Failed to get network groups from upstream.",
+      502,
+      response,
     );
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
   }
 }
 

@@ -1,6 +1,5 @@
 const express = require("express");
-const asyncHandler = require("../middleware/asyncHandler");
-const bearerTokenMiddleware = require("../middleware/bearerToken");
+const { asyncHandler, bearerTokenMiddleware } = require("../middleware");
 
 function createAuthRoutes({ authController }) {
   const router = express.Router();

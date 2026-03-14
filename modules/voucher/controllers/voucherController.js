@@ -55,14 +55,6 @@ function createVoucherController({ voucherUseCases }) {
       );
       res.json(data);
     },
-
-    async printUnusedVouchers(req, res) {
-      const data = await voucherUseCases.printUnusedVouchers(
-        req.bearerToken,
-        req.body,
-      );
-      res.json(data);
-    },
   };
 }
 

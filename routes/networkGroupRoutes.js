@@ -1,13 +1,12 @@
-const express = require('express');
-const asyncHandler = require('../middleware/asyncHandler');
-const bearerTokenMiddleware = require('../middleware/bearerToken');
+const express = require("express");
+const { asyncHandler, bearerTokenMiddleware } = require("../middleware");
 
 function createNetworkGroupRoutes({ networkGroupController }) {
   const router = express.Router();
 
   router.use(bearerTokenMiddleware);
 
-  router.get('/', asyncHandler(networkGroupController.listNetworkGroups));
+  router.get("/", asyncHandler(networkGroupController.listNetworkGroups));
 
   return router;
 }

@@ -1,4 +1,25 @@
 const { resolveAuthenticatedSession } = require("../../../helpers/tokenParser");
+const {
+  ValidationError,
+  UpstreamError,
+  AuthenticationError,
+} = require("../../../helpers/AppError");
+const {
+  validate,
+  isRequired,
+  isObject,
+  isNumber,
+  isPositive,
+  oneOf,
+} = require("../../../helpers/validation");
+const {
+  formatSpeed,
+  formatDuration,
+  formatTimestamp,
+  formatDateOnly,
+  formatShortDateTime,
+} = require("../../../helpers/formatter");
+const { chunkArray } = require("../../../helpers/utils");
 
 // VOUCHER STATUS CONSTANTS
 const VOUCHER_STATUS = {
@@ -7,132 +28,93 @@ const VOUCHER_STATUS = {
   EXPIRED: 3, // expired
 };
 
+/**
+ * Validates that groupId is present in the query.
+ * @param {object} query - Request query object.
+ * @param {string} label - Context label for the error message.
+ */
 function validateGroupIdQuery(query, label) {
-  if (!query?.groupId) {
-    const error = new Error(`groupId is required in query for ${label}.`);
-    error.statusCode = 400;
-    throw error;
-  }
+  validate(query, {
+    groupId: [isRequired(`groupId is required in query for ${label}.`)],
+  });
 }
 
+/**
+ * Validates that groupId is present for voucher status request.
+ * @param {object} query - Request query object.
+ */
 function validateVoucherStatusQuery(query) {
-  if (!query?.groupId) {
-    const error = new Error("groupId is required in query for voucher status.");
-    error.statusCode = 400;
-    throw error;
-  }
+  validate(query, {
+    groupId: [isRequired("groupId is required in query for voucher status.")],
+  });
 }
 
+/**
+ * Validates the upstream response for a voucher list request.
+ * @param {object} response - Raw response from upstream.
+ */
 function validateVoucherListSuccess(response) {
   if (Number(response?.code) !== 0) {
-    const error = new Error(response?.msg || "Get voucher list failed.");
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
+    throw new UpstreamError(
+      response?.msg || "Get voucher list failed.",
+      502,
+      response,
+    );
   }
 
   if (Number(response?.voucherData?.code) !== 0) {
-    const error = new Error(
+    throw new UpstreamError(
       response?.voucherData?.msg || "Voucher data fetch failed.",
+      502,
+      response,
     );
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
   }
 }
 
+/**
+ * Validates the upstream response for a voucher status request.
+ * @param {object} response - Raw response from upstream.
+ */
 function validateVoucherStatusSuccess(response) {
   if (Number(response?.code) !== 0) {
-    const error = new Error(response?.msg || "Get voucher status failed.");
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
+    throw new UpstreamError(
+      response?.msg || "Get voucher status failed.",
+      502,
+      response,
+    );
   }
 
   if (Number(response?.voucherData?.code) !== 0) {
-    const error = new Error(
+    throw new UpstreamError(
       response?.voucherData?.msg || "Voucher status fetch failed.",
+      502,
+      response,
     );
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
   }
 }
 
-function formatSpeed(rateLimit) {
-  const value = Number(rateLimit) || 0;
-
-  if (value <= 0) {
-    return "0Mbps";
-  }
-
-  const mbps = value / 1024;
-
-  if (Number.isInteger(mbps)) {
-    return `${mbps}Mbps`;
-  }
-
-  return `${mbps.toFixed(2)}Mbps`;
-}
-
-function formatDuration(timePeriod) {
-  const minutes = Number(timePeriod) || 0;
-
-  if (minutes === 0) {
-    return "Unlimited";
-  }
-
-  if (minutes % 1440 === 0) {
-    const days = minutes / 1440;
-    return `${days} day${days > 1 ? "s" : ""}`;
-  }
-
-  if (minutes % 60 === 0) {
-    const hours = minutes / 60;
-    return `${hours} hour${hours > 1 ? "s" : ""}`;
-  }
-
-  return `${minutes} min`;
-}
-
-function formatTimestamp(timestamp) {
-  if (!timestamp) return "";
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-}
-
-function formatDateOnly(timestamp) {
-  if (!timestamp) return "";
-  const date = new Date(timestamp);
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const year = date.getFullYear();
-  return `${month}/${day}/${year}`;
-}
-
+/**
+ * Groups vouchers by date and sorts them in descending order.
+ * @param {object[]} vouchers - Array of mapped voucher objects.
+ * @param {number} status - The status code used to determine which timestamp to group by.
+ * @returns {object[]} Grouped vouchers array.
+ */
 function groupVouchersByDate(vouchers, status) {
   const groups = {};
 
   vouchers.forEach((voucher) => {
     let timestamp;
-    let timeType;
+    let time_type;
 
-    // Determine which timestamp to use based on status
     if (status === VOUCHER_STATUS.EXPIRED && voucher.expiryTime) {
       timestamp = voucher.expiryTime;
-      timeType = "expiryDate";
+      time_type = "expiry_date";
     } else if (status === VOUCHER_STATUS.INUSE && voucher.loginTime) {
       timestamp = voucher.loginTime;
-      timeType = "loginDate";
+      time_type = "login_date";
     } else {
       timestamp = voucher.createTime;
-      timeType = "createDate";
+      time_type = "create_date";
     }
 
     const dateKey = formatDateOnly(timestamp);
@@ -140,7 +122,7 @@ function groupVouchersByDate(vouchers, status) {
     if (!groups[dateKey]) {
       groups[dateKey] = {
         date: dateKey,
-        timeType,
+        time_type,
         vouchers: [],
       };
     }
@@ -155,46 +137,51 @@ function groupVouchersByDate(vouchers, status) {
   });
 }
 
+/**
+ * Maps a raw upstream voucher item to the standardized response format.
+ * @param {object} item - Raw voucher item from upstream.
+ * @returns {object} Formatted voucher object.
+ */
 function mapVoucher(item) {
-  const packagePrice = Number(item?.packagePrice) || 0;
+  const package_price = Number(item?.packagePrice) || 0;
 
   return {
-    voucherCode: item?.voucherCode || "",
-    timePeriod: Number(item?.timePeriod) || 0,
-    maxClients: Number(item?.maxClients) || 0,
+    voucher_code: item?.voucherCode || "",
+    time_period: Number(item?.timePeriod) || 0,
+    max_clients: Number(item?.maxClients) || 0,
     status: String(item?.status || ""),
-    packagePrice,
-    bindMac: Number(item?.bindMac) || 0,
-    packageName: item?.packageName || "",
-    userGroupId: String(item?.userGroupId || ""),
-    disableStatus: Number(item?.disableStatus) || 0,
-    price: `${packagePrice}ကျပ်`,
-    dl_speed: formatSpeed(item?.downloadRateLimit),
-    ul_speed: formatSpeed(item?.uploadRateLimit),
+    package_price,
+    price_label: `${package_price}ကျပ်`,
+    bind_mac: Number(item?.bindMac) || 0,
+    package_name: item?.packageName || "",
+    user_group_id: String(item?.userGroupId || ""),
+    disable_status: Number(item?.disableStatus) || 0,
+    speed: formatSpeed(item?.downloadRateLimit),
     duration: formatDuration(item?.timePeriod),
-    createTime: item?.createTime || null,
-    humanCreateTime: formatTimestamp(item?.createTime),
-    expiryTime: item?.expiryTime || null,
-    humanExpiryTime: formatTimestamp(item?.expiryTime),
-    loginTime: item?.loginTime || null,
-    humanLoginTime: formatTimestamp(item?.loginTime),
+    create_time: formatShortDateTime(item?.createTime),
+    expiry_time: formatShortDateTime(item?.expiryTime),
+    login_time: formatShortDateTime(item?.loginTime),
   };
 }
 
+/**
+ * Maps a raw voucher item including UUID and human-readable timestamps.
+ * @param {object} item - Raw voucher item.
+ * @returns {object} Extended voucher object.
+ */
 function mapVoucherWithTimestamps(item) {
   const base = mapVoucher(item);
   return {
     ...base,
     uuid: item?.uuid || "",
-    expiryTime: item?.expiryTime || null,
-    humanExpiryTime: formatTimestamp(item?.expiryTime),
-    loginTime: item?.loginTime || null,
-    humanLoginTime: formatTimestamp(item?.loginTime),
-    createTime: item?.createTime || null,
-    humanCreateTime: formatTimestamp(item?.createTime),
   };
 }
 
+/**
+ * Maps a newly generated voucher item to a simplified format.
+ * @param {object} item - Raw generated voucher.
+ * @returns {object} Simplified voucher data.
+ */
 function mapGeneratedVoucher(item) {
   return {
     uuid: item?.uuid || "",
@@ -205,6 +192,11 @@ function mapGeneratedVoucher(item) {
   };
 }
 
+/**
+ * Maps voucher status summary data.
+ * @param {object} voucherData - Upstream voucher data summary.
+ * @returns {object} Mapped status summary.
+ */
 function mapVoucherStatus(voucherData) {
   return {
     expired: Number(voucherData?.expired) || 0,
@@ -213,91 +205,87 @@ function mapVoucherStatus(voucherData) {
   };
 }
 
+/**
+ * Validates input for deleting expired vouchers.
+ * @param {object} query - Request query object.
+ */
 function validateDeleteExpiredInput(query) {
-  if (!query?.groupId) {
-    const error = new Error(
-      "groupId is required in query for deleting vouchers.",
-    );
-    error.statusCode = 400;
-    throw error;
-  }
+  validate(query, {
+    groupId: [
+      isRequired("groupId is required in query for deleting vouchers."),
+    ],
+  });
 }
 
+/**
+ * Validates input for generating new vouchers.
+ * @param {object} payload - Request body object.
+ */
 function validateGenerateVoucherInput(payload) {
-  if (!payload || typeof payload !== "object") {
-    const error = new Error("Voucher payload is required.");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (!payload.groupId) {
-    const error = new Error("groupId is required in voucher payload.");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (!payload.userGroupId) {
-    const error = new Error("userGroupId is required in voucher payload.");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (!payload.profile && !payload.authProfileId) {
-    const error = new Error(
-      "profile (or authProfileId) is required in voucher payload.",
-    );
-    error.statusCode = 400;
-    throw error;
-  }
+  validate(payload, {
+    groupId: [isRequired("groupId is required in voucher payload.")],
+    userGroupId: [isRequired("userGroupId is required in voucher payload.")],
+    count: [
+      isRequired("count is required"),
+      isNumber("count must be a number"),
+      isPositive("count must be a positive number"),
+    ],
+    _crossFieldValidators: [
+      oneOf(
+        ["profile", "authProfileId"],
+        "profile (or authProfileId) is required in voucher payload.",
+      ),
+    ],
+  });
 }
 
+/**
+ * Validates the upstream response for voucher generation.
+ * @param {object} response - Upstream response.
+ */
 function validateGenerateVoucherSuccess(response) {
   if (Number(response?.code) !== 0) {
-    const error = new Error(response?.msg || "Create voucher failed.");
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
+    throw new UpstreamError(
+      response?.msg || "Create voucher failed.",
+      502,
+      response,
+    );
   }
 
   if (Number(response?.voucherData?.code) !== 0) {
-    const error = new Error(
+    throw new UpstreamError(
       response?.voucherData?.msg || "Create voucher voucherData failed.",
+      502,
+      response,
     );
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
   }
 }
 
+/**
+ * Validates the upstream response for a batch deletion request.
+ * @param {object} response - Upstream response.
+ */
 function validateDeleteBatchResponse(response) {
   if (Number(response?.code) !== 0) {
-    const error = new Error(response?.msg || "Delete voucher batch failed.");
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
+    throw new UpstreamError(
+      response?.msg || "Delete voucher batch failed.",
+      502,
+      response,
+    );
   }
 
   if (Number(response?.voucherData?.code) !== 0) {
-    const error = new Error(
+    throw new UpstreamError(
       response?.voucherData?.msg || "Delete voucher batch voucherData failed.",
+      502,
+      response,
     );
-    error.statusCode = 502;
-    error.details = response;
-    throw error;
   }
 }
 
-function chunkArray(items, chunkSize) {
-  const chunks = [];
-
-  for (let index = 0; index < items.length; index += chunkSize) {
-    chunks.push(items.slice(index, index + chunkSize));
-  }
-
-  return chunks;
-}
-
-// Shared private helper — fetches vouchers from upstream with a fixed status
+/**
+ * Internal helper to fetch vouchers from upstream based on status.
+ */
 async function fetchVouchersByStatus(
   { voucherGateway, voucherSessionRepository },
   token,
@@ -310,11 +298,9 @@ async function fetchVouchersByStatus(
   );
 
   if (!session.tenantName) {
-    const error = new Error(
+    throw new AuthenticationError(
       "tenantName is missing in session. Please login again.",
     );
-    error.statusCode = 401;
-    throw error;
   }
 
   const upstreamResponse = await voucherGateway.listVouchers(token, {
@@ -333,49 +319,72 @@ async function fetchVouchersByStatus(
     ? upstreamResponse.voucherData.list
     : [];
 
-  return list.map(mapVoucher);
+  return list;
 }
 
+/**
+ * Groups raw vouchers by date, then maps each voucher via mapVoucher.
+ */
+function groupAndMapVouchers(rawVouchers, status) {
+  const grouped = groupVouchersByDate(rawVouchers, status);
+  return grouped.map((group) => ({
+    ...group,
+    vouchers: group.vouchers.map(mapVoucher),
+  }));
+}
+
+/**
+ * Factory for creating voucher use cases.
+ */
 function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
   const deps = { voucherGateway, voucherSessionRepository };
 
   return {
-    // GET /vouchers/active — inuse (status=2)
+    /**
+     * Lists active (in-use) vouchers.
+     */
     async listActiveVouchers(token, query) {
       validateGroupIdQuery(query, "active vouchers");
-      const vouchers = await fetchVouchersByStatus(
+      const rawVouchers = await fetchVouchersByStatus(
         deps,
         token,
         query,
         VOUCHER_STATUS.INUSE,
       );
-      return groupVouchersByDate(vouchers, VOUCHER_STATUS.INUSE);
+      return groupAndMapVouchers(rawVouchers, VOUCHER_STATUS.INUSE);
     },
 
-    // GET /vouchers/remain — unused (status=1)
+    /**
+     * Lists remaining (unused) vouchers.
+     */
     async listRemainVouchers(token, query) {
       validateGroupIdQuery(query, "remaining vouchers");
-      const vouchers = await fetchVouchersByStatus(
+      const rawVouchers = await fetchVouchersByStatus(
         deps,
         token,
         query,
         VOUCHER_STATUS.UNUSED,
       );
-      return groupVouchersByDate(vouchers, VOUCHER_STATUS.UNUSED);
+      return groupAndMapVouchers(rawVouchers, VOUCHER_STATUS.UNUSED);
     },
 
-    // GET /vouchers/expired — expired (status=3)
+    /**
+     * Lists expired vouchers.
+     */
     async listExpiredVouchers(token, query) {
       validateGroupIdQuery(query, "expired vouchers");
-      const vouchers = await fetchVouchersByStatus(
+      const rawVouchers = await fetchVouchersByStatus(
         deps,
         token,
         query,
         VOUCHER_STATUS.EXPIRED,
       );
-      return groupVouchersByDate(vouchers, VOUCHER_STATUS.EXPIRED);
+      return groupAndMapVouchers(rawVouchers, VOUCHER_STATUS.EXPIRED);
     },
 
+    /**
+     * Retrieves the voucher status summary (total, used, expired).
+     */
     async getVoucherStatus(token, query) {
       validateVoucherStatusQuery(query);
 
@@ -385,11 +394,9 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       );
 
       if (!session.tenantName || !session.tenantId) {
-        const error = new Error(
+        throw new AuthenticationError(
           "tenantName and tenantId are missing in session. Please login again.",
         );
-        error.statusCode = 401;
-        throw error;
       }
 
       const upstreamResponse = await voucherGateway.getVoucherStatus(token, {
@@ -404,6 +411,9 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       return mapVoucherStatus(upstreamResponse?.voucherData);
     },
 
+    /**
+     * Retrieves voucher performance metrics (last day, monthly).
+     */
     async getVoucherPerformance(token, query) {
       validateGroupIdQuery(query, "voucher performance");
 
@@ -413,113 +423,84 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       );
 
       if (!session.tenantName) {
-        const error = new Error(
+        throw new AuthenticationError(
           "tenantName is missing in session. Please login again.",
         );
-        error.statusCode = 401;
-        throw error;
       }
 
-      // Fetch all vouchers to calculate performance
-      const upstreamResponse = await voucherGateway.listVouchers(token, {
+      const commonParams = {
         tenantName: session.tenantName,
         groupId: query.groupId,
         start: 0,
         pageSize: 1000,
-        status: VOUCHER_STATUS.INUSE, // Get used vouchers for performance
         lang: query.lang || "en",
         accessToken,
+      };
+
+      // Fetch in-use vouchers for lastDay calculation
+      const inuseResponse = await voucherGateway.listVouchers(token, {
+        ...commonParams,
+        status: VOUCHER_STATUS.INUSE,
       });
+      validateVoucherListSuccess(inuseResponse);
+      const inuseVouchers = Array.isArray(inuseResponse?.voucherData?.list)
+        ? inuseResponse.voucherData.list
+        : [];
 
-      validateVoucherListSuccess(upstreamResponse);
-
-      const vouchers = Array.isArray(upstreamResponse?.voucherData?.list)
-        ? upstreamResponse.voucherData.list
+      // Fetch expired vouchers for monthly calculation
+      const expiredResponse = await voucherGateway.listVouchers(token, {
+        ...commonParams,
+        status: VOUCHER_STATUS.EXPIRED,
+      });
+      validateVoucherListSuccess(expiredResponse);
+      const expiredVouchers = Array.isArray(expiredResponse?.voucherData?.list)
+        ? expiredResponse.voucherData.list
         : [];
 
       const now = Date.now();
       const oneDayAgo = now - 24 * 60 * 60 * 1000;
       const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
 
-      const lastDay = { count: 0, price: 0 };
-      const monthly = { count: 0, price: 0 };
-
-      vouchers.forEach((voucher) => {
+      // lastDay: in-use vouchers activated within last 24 hours
+      const lastDay = { count: 0, price: 0, packages: {} };
+      inuseVouchers.forEach((voucher) => {
         const loginTime = voucher.loginTime || 0;
         const price = Number(voucher.packagePrice) || 0;
-
+        const pkgName = voucher.packageName || "Unknown";
         if (loginTime >= oneDayAgo) {
           lastDay.count += 1;
           lastDay.price += price;
-        }
-
-        if (loginTime >= oneMonthAgo) {
-          monthly.count += 1;
-          monthly.price += price;
+          lastDay.packages[pkgName] = (lastDay.packages[pkgName] || 0) + 1;
         }
       });
+      // Convert packages map to array
+      lastDay.packages = Object.entries(lastDay.packages).map(
+        ([name, count]) => ({ name, count }),
+      );
+
+      // monthly: expired vouchers that expired within last 30 days
+      const monthly = { count: 0, price: 0, packages: {} };
+      expiredVouchers.forEach((voucher) => {
+        const expiryTime = voucher.expiryTime || 0;
+        const price = Number(voucher.packagePrice) || 0;
+        const pkgName = voucher.packageName || "Unknown";
+        if (expiryTime >= oneMonthAgo) {
+          monthly.count += 1;
+          monthly.price += price;
+          monthly.packages[pkgName] = (monthly.packages[pkgName] || 0) + 1;
+        }
+      });
+      // Convert packages map to array
+      monthly.packages = Object.entries(monthly.packages).map(
+        ([name, count]) => ({ name, count }),
+      );
 
       return { lastDay, monthly };
     },
 
-    async printUnusedVouchers(token, payload) {
-      const { groupId, voucherCount, voucherList = [] } = payload || {};
-
-      if (!groupId) {
-        const error = new Error("groupId is required for printing vouchers.");
-        error.statusCode = 400;
-        throw error;
-      }
-
-      if (!voucherCount || voucherCount <= 0) {
-        const error = new Error("voucherCount must be a positive number.");
-        error.statusCode = 400;
-        throw error;
-      }
-
-      const { session, accessToken } = await resolveAuthenticatedSession(
-        token,
-        voucherSessionRepository,
-      );
-
-      if (!session.tenantName) {
-        const error = new Error(
-          "tenantName is missing in session. Please login again.",
-        );
-        error.statusCode = 401;
-        throw error;
-      }
-
-      // Fetch unused vouchers (status=1)
-      const upstreamResponse = await voucherGateway.listVouchers(token, {
-        tenantName: session.tenantName,
-        groupId,
-        start: 0,
-        pageSize: 1000,
-        status: VOUCHER_STATUS.UNUSED,
-        lang: "en",
-        accessToken,
-      });
-
-      validateVoucherListSuccess(upstreamResponse);
-
-      const allUnused = Array.isArray(upstreamResponse?.voucherData?.list)
-        ? upstreamResponse.voucherData.list
-        : [];
-
-      // Filter out already printed vouchers
-      const printedUuids = new Set(
-        (voucherList || []).map((v) => String(v.uuid || "")),
-      );
-
-      const unprintedVouchers = allUnused
-        .filter((v) => !printedUuids.has(String(v.uuid || "")))
-        .slice(0, voucherCount)
-        .map(mapVoucher);
-
-      return groupVouchersByDate(unprintedVouchers, VOUCHER_STATUS.UNUSED);
-    },
-
+    /**
+     * Generates new vouchers via the upstream API.
+     */
     async generateVoucher(token, payload) {
       validateGenerateVoucherInput(payload);
 
@@ -529,11 +510,9 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       );
 
       if (!session.tenantName) {
-        const error = new Error(
+        throw new AuthenticationError(
           "tenantName is missing in session. Please login again.",
         );
-        error.statusCode = 401;
-        throw error;
       }
 
       const quantity = String(
@@ -577,6 +556,9 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       };
     },
 
+    /**
+     * Fetches and deletes all expired vouchers for a specific group.
+     */
     async deleteExpiredVouchers(token, query) {
       validateDeleteExpiredInput(query);
 
@@ -586,14 +568,11 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
       );
 
       if (!session.tenantName) {
-        const error = new Error(
+        throw new AuthenticationError(
           "tenantName is missing in session. Please login again.",
         );
-        error.statusCode = 401;
-        throw error;
       }
 
-      // Fetch expired vouchers (status=3)
       const upstreamResponse = await voucherGateway.listVouchers(token, {
         tenantName: session.tenantName,
         groupId: query.groupId,
@@ -620,7 +599,6 @@ function createVoucherUseCases({ voucherGateway, voucherSessionRepository }) {
         };
       }
 
-      // Extract uuid and voucherCode for deletion
       const rows = expiredList.map((item) => ({
         uuid: String(item?.uuid || ""),
         voucherCode: String(item?.voucherCode || ""),

@@ -630,49 +630,6 @@ function createDemoRoutes() {
     });
   });
 
-  router.post("/clients/print", (req, res) => {
-    const { groupId, voucherCount, voucherList = [] } = req.body || {};
-
-    if (!groupId) {
-      res.status(400).json({
-        message: "groupId is required for printing vouchers.",
-      });
-      return;
-    }
-
-    if (!voucherCount || voucherCount <= 0) {
-      res.status(400).json({
-        message: "voucherCount must be a positive number.",
-      });
-      return;
-    }
-
-    // Get unused vouchers
-    const unusedVouchers = demoState.vouchers.filter(
-      (item) =>
-        String(item.groupId) === String(groupId) && String(item.status) === "1",
-    );
-
-    // Filter out already printed vouchers
-    const printedUuids = new Set(
-      (voucherList || []).map((v) => String(v.uuid || "")),
-    );
-    const unprintedVouchers = unusedVouchers
-      .filter((v) => !printedUuids.has(String(v.uuid || "")))
-      .slice(0, voucherCount);
-
-    // Group by date (simplified demo version)
-    const grouped = [
-      {
-        date: nowIso().split("T")[0].replace(/-/g, "/"),
-        timeType: "createDate",
-        vouchers: unprintedVouchers,
-      },
-    ];
-
-    res.json(grouped);
-  });
-
   return router;
 }
 

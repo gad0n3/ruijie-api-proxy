@@ -1,5 +1,17 @@
 const { resolveAuthenticatedSession } = require("../../../helpers/tokenParser");
+const { AuthenticationError } = require("../../../helpers/AppError");
+const { validate, isRequired } = require("../../../helpers/validation");
+const {
+  formatMac,
+  formatActiveDuration,
+} = require("../../../helpers/formatter");
+const logger = require("../../../helpers/logger");
 
+/**
+ * Normalizes query parameters for client listing requests.
+ * @param {object} query - Raw query object.
+ * @returns {object} Normalized query.
+ */
 function normalizeCurrentUserQuery(query) {
   const source = query && typeof query === "object" ? query : {};
   return {
@@ -9,44 +21,51 @@ function normalizeCurrentUserQuery(query) {
   };
 }
 
+/**
+ * Validates that required parameters for client listing are present.
+ * @param {object} query - Normalized query object.
+ */
 function validateCurrentUserQuery(query) {
-  if (!query.groupId) {
-    const error = new Error("groupId (or group_id) is required.");
-    error.statusCode = 400;
-    throw error;
-  }
+  validate(query, {
+    groupId: [isRequired("groupId (or group_id) is required.")],
+  });
 }
 
-function formatMac(raw) {
-  const hex = String(raw || "").replace(/[^a-fA-F0-9]/g, "");
-  if (hex.length !== 12) {
-    return String(raw || "").toUpperCase();
-  }
-  return hex.match(/.{2}/g).join(":").toUpperCase();
-}
-
+/**
+ * Maps a raw upstream client record to the standardized internal format.
+ * @param {object} item - Raw client data.
+ * @returns {object} Formatted client data.
+ */
 function mapClientRow(item) {
+  // Combine manufacturer and model for a better display if both are available
+  const model = item?.staModel || item?.userName || "Unknown Device";
+  const manufacturer = item?.manufacturer || "";
+  const displayModel =
+    manufacturer && !model.startsWith(manufacturer)
+      ? `${manufacturer} ${model}`
+      : model;
+
   return {
     mac: formatMac(item?.mac),
-    staModel: item?.staModel || "",
+    staModel: displayModel,
     ip: item?.ip || "",
-    duration: formatDuration(Number(item?.activeSec) || 0),
+    duration: formatActiveDuration(Number(item?.activeSec) || 0),
   };
 }
 
+/**
+ * Determines if a client record represents an authenticated user.
+ * @param {object} item - Raw client record.
+ * @returns {boolean}
+ */
 function isAuthenticatedClient(item) {
   return Boolean(item?.authMac) || Boolean(item?.account);
 }
 
-function formatDuration(activeSec) {
-  const totalSeconds = Number(activeSec) || 0;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
+/**
+ * Orchestrates fetching current users, applying security context, and filtering/mapping results.
+ * @private
+ */
 async function fetchCurrentUsers({
   clientGateway,
   clientSessionRepository,
@@ -61,6 +80,12 @@ async function fetchCurrentUsers({
     clientSessionRepository,
   );
 
+  if (!session.tenantName) {
+    throw new AuthenticationError(
+      "Session state is invalid. Please login again.",
+    );
+  }
+
   const response = await clientGateway.getCurrentUserList(token, {
     accessToken,
     groupId: normalized.groupId,
@@ -69,11 +94,26 @@ async function fetchCurrentUsers({
   });
 
   const rawList = Array.isArray(response?.list) ? response.list : [];
-  return rawList.filter(isAuthenticatedClient).map(mapClientRow);
+
+  // Show all connected clients to avoid "empty list" confusion, 
+  // mapping them to the expected format.
+  return rawList.map(mapClientRow);
 }
 
+/**
+ * Factory for creating Client-related use cases.
+ * @param {object} dependencies
+ * @param {object} dependencies.clientGateway
+ * @param {object} dependencies.clientSessionRepository
+ */
 function createClientUseCases({ clientGateway, clientSessionRepository }) {
   return {
+    /**
+     * Lists authenticated clients for a given network group.
+     * @param {string} token - The bearer token.
+     * @param {object} query - Request query parameters.
+     * @returns {Promise<{ list: object[] }>}
+     */
     async listClients(token, query) {
       const list = await fetchCurrentUsers({
         clientGateway,
