@@ -37,11 +37,24 @@ function validateCurrentUserQuery(query) {
  * @returns {object} Formatted client data.
  */
 function mapClientRow(item) {
-  // Combine manufacturer and model for a better display if both are available
-  const model = item?.staModel || item?.userName || "Unknown Device";
-  const manufacturer = item?.manufacturer || "";
+  const rawModel = item?.staModel || "";
+  const rawUser = item?.userName || "";
+  const manufacturer = (item?.manufacturer || "").trim();
+
+  let model = (rawModel || rawUser || "Unknown Device").trim();
+
+  // Handle case where some APIs return "null" or "undefined" as strings or append them
+  model = model.replace(/null$/i, "").replace(/undefined$/i, "").trim();
+
+  if (!model || model.toLowerCase() === "null" || model.toLowerCase() === "undefined") {
+    model = "Unknown Device";
+  }
+
   const displayModel =
-    manufacturer && !model.startsWith(manufacturer)
+    manufacturer &&
+    manufacturer.toLowerCase() !== "null" &&
+    manufacturer.toLowerCase() !== "undefined" &&
+    !model.toLowerCase().startsWith(manufacturer.toLowerCase())
       ? `${manufacturer} ${model}`
       : model;
 

@@ -134,7 +134,7 @@ Voucher listings are automatically **grouped by date** and sorted descending.
 {
   "data": [
     {
-      "date": "03/14/2026",
+      "date": "3/14/2026",
       "time_type": "create_date",
       "vouchers": [
         {
@@ -173,7 +173,27 @@ Voucher listings are automatically **grouped by date** and sorted descending.
 
 **Other Voucher Actions:**
 - `GET /vouchers/status?groupId=...`: Returns `{ expired, total, used }`.
-- `GET /vouchers/performance?groupId=...`: Returns `{ lastDay: {count, price}, monthly: {count, price} }`.
+- `GET /vouchers/performance?groupId=...`: Returns summary with package breakdowns.
+  ```json
+  {
+    "success": true,
+    "data": {
+      "lastDay": {
+        "count": 2,
+        "price": 2000,
+        "packages": [{ "name": "1000mmk", "count": 2 }]
+      },
+      "monthly": {
+        "count": 10,
+        "price": 10000,
+        "packages": [
+          { "name": "1D @ 10MBPS", "count": 2 },
+          { "name": "1000mmk", "count": 8 }
+        ]
+      }
+    }
+  }
+  ```
 - `POST /vouchers/generate`: Create new vouchers. Payload requires `groupId`, `userGroupId`, `profile`, and `count`.
 - `DELETE /vouchers/expired?groupId=...`: Batch deletes all expired vouchers for the group.
 
